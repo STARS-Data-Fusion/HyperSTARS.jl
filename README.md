@@ -7,37 +7,37 @@ This Julia package, `HyperSTARS.jl`, is designed for advanced hyperspectral data
 Margaret C. Johnson (she/her)<br>
 [maggie.johnson@jpl.nasa.gov](mailto:maggie.johnson@jpl.nasa.gov)<br>
 Principal investigator: lead of data fusion methodological development and Julia code implementations.<br>
-NASA Jet Propulsion Laboratory 398L
+NASA Jet Propulsion Laboratory 
 
 [Gregory H. Halverson](https://github.com/gregory-halverson-jpl) (they/them)<br>
 [gregory.h.halverson@jpl.nasa.gov](mailto:gregory.h.halverson@jpl.nasa.gov)<br>
-Lead developer for data processing pipeline design and development, moving window implementation, and code organization and management.<br>
-NASA Jet Propulsion Laboratory 329G
-
-Jouni I. Susiluoto<br>
-[jouni.i.susiluoto@jpl.nasa.gov](mailto:jouni.i.susiluoto@jpl.nasa.gov)<br>
-Technical contributor for methodology development, co- developer of Julia code for Kalman filtering recursion.
-NASA Jet Propulsion Laboratory 398L
-
-Kerry Cawse-Nicholson (she/her)<br>
-[kerry-anne.cawse-nicholson@jpl.nasa.gov](mailto:kerry-anne.cawse-nicholson@jpl.nasa.gov)<br>
-Concept development and project management. Advised on technical and scientific requirements for application and mission integration.<br>
-NASA Jet Propulsion Laboratory 329G
-
-Joshua B. Fisher (he/him)<br>
-[jbfisher@chapman.edu](mailto:jbfisher@chapman.edu)<br>
-Concept development and project management<br>
-Chapman University
-
-Glynn C. Hulley (he/him)<br>
-[glynn.hulley@jpl.nasa.gov](mailto:glynn.hulley@jpl.nasa.gov)<br>
-Advised on technical and scientific requirements for application and mission integration.<br>
-NASA Jet Propulsion Laboratory 329G
+Lead developer for data processing pipelines, code organization and management.<br>
+NASA Jet Propulsion Laboratory 
 
 Nimrod Carmon (he/him)<br>
 [nimrod.carmon@jpl.nasa.gov](mailto:nimrod.carmon@jpl.nasa.gov)<br>
 Technical contributor for data processing, validation/verification, and hyperspectral resampling<br>
-NASA Jet Propulsion Laboratory 398L
+NASA Jet Propulsion Laboratory 
+
+Jouni I. Susiluoto<br>
+[jouni.i.susiluoto@jpl.nasa.gov](mailto:jouni.i.susiluoto@jpl.nasa.gov)<br>
+Technical contributor for methodology development.
+NASA Jet Propulsion Laboratory 
+
+Amy Braverman (she/her)<br>
+[amy.j.braverman@jpl.nasa.gov](mailto:amy.j.braverman@jpl.nasa.gov)<br>
+Technical contributor for methodology development.
+NASA Jet Propulsion Laboratory 
+
+Philip Brodrick (he/him) <br>
+[philip.brodrick@jpl.nasa.gov](mailto:philip.brodrick@jpl.nasa.gov)<br>
+Science and applications discussions, EMIT data considerations.<br>
+NASA Jet Propulsion Laboratory 
+
+Kerry Cawse-Nicholson (she/her)<br>
+[kerry-anne.cawse-nicholson@jpl.nasa.gov](mailto:kerry-anne.cawse-nicholson@jpl.nasa.gov)<br>
+Science and applications discussions.<br>
+NASA Jet Propulsion Laboratory
 
 ## Key Features
 
@@ -93,7 +93,7 @@ The package is structured into several Julia files, each focusing on specific fu
 
     * Includes `rsr_conv_matrix` for converting Relative Spectral Response (RSR) information into spectral convolution matrices, handling both FWHM and discrete RSR curve inputs.
 
-* **`spatial_utils.jl` (and `spatial_utils_II.jl`)**:
+* **`spatial_utils.jl` (and `spatial_utils_ll.jl`)**:
 
     * These files provide a suite of utility functions for spatial indexing, coordinate transformations, and grid operations.
 
