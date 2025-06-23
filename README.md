@@ -21,12 +21,12 @@ NASA Jet Propulsion Laboratory
 
 Jouni I. Susiluoto<br>
 [jouni.i.susiluoto@jpl.nasa.gov](mailto:jouni.i.susiluoto@jpl.nasa.gov)<br>
-Technical contributor for methodology development.
+Technical contributor for methodology development.<br>
 NASA Jet Propulsion Laboratory 
 
 Amy Braverman (she/her)<br>
 [amy.j.braverman@jpl.nasa.gov](mailto:amy.j.braverman@jpl.nasa.gov)<br>
-Technical contributor for methodology development.
+Technical contributor for methodology development.<br>
 NASA Jet Propulsion Laboratory 
 
 Philip Brodrick (he/him) <br>
