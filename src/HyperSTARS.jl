@@ -1203,7 +1203,7 @@ function create_data_dicts( ii )
     d[:kp_ij] = tind
     d[:prior_mean] = prior_mean_sub
     d[:prior_var] = prior_var_sub
-    d[:model_pars] = model_pars
+    d[:model_pars] = @views model_pars[k,l,:,:]
 
     return d
 end
@@ -1322,7 +1322,7 @@ function scene_fusion_pmap(inst_data::AbstractVector{InstrumentData},
         d[:kp_ij] = tind
         d[:prior_mean] = prior_mean_sub
         d[:prior_var] = prior_var_sub
-        d[:model_pars] = model_pars
+        d[:model_pars] = @views model_pars[k,l,:,:]
         push!(T,d)
     end
 
@@ -1346,5 +1346,6 @@ function scene_fusion_pmap(inst_data::AbstractVector{InstrumentData},
     return fused_image, fused_sd_image
 
 end
+
 
 end # end of module
