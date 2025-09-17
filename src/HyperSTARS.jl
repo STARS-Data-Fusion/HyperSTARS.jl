@@ -20,6 +20,7 @@ export scene_fusion_pmap
 export create_data_dicts
 export hyperSTARS_fusion_kr_dict
 export woodbury_filter_kr
+export woodbury_filter_kr!
 export smooth_series
 
 export InstrumentData
@@ -324,6 +325,88 @@ function woodbury_filter_kr(Ms::AbstractVector{<:HSModel},
     return x_new, P_new
 end
 
+## Struct to hold memory allocations for woodbury_filter_kr!()
+struct HSModel_helpers{Float64}
+    HViH::AbstractMatrix{Float64}
+    HVie::AbstractVector{Float64}
+    F::AbstractMatrix{Float64}
+end
+
+"""
+    woodbury_filter_kr!(x_new, P_new, Ms, ys, x_pred, P_pred)
+
+In-place implementation of woodbury_filter_kr(), modifies x_new, P_new in-place.
+"""
+function woodbury_filter_kr!(x_new::AbstractVector{Float64}, 
+        P_new::AbstractArray{Float64}, 
+        Ms::AbstractVector{<:HyperSTARS.HSModel}, 
+        M_helpers::HSModel_helpers,
+        ys::AbstractVector{<:AbstractArray{Float64}}, 
+        x_pred::AbstractVector{Float64}, 
+        P_pred::AbstractArray{Float64}) 
+
+    K = length(Ms)
+    N = size(x_pred,1)
+    ns = size(Ms[1].Hs,2)
+    nw = size(Ms[1].Hw,2)
+
+    HViH = @views M_helpers.HViH #zeros(N,N)
+    HVie = @views M_helpers.HVie #zeros(N)
+    # x_new = ones(N)
+    # P_new = zeros(N,N)
+    F = @views M_helpers.F #zeros(N,N)
+
+    x_predr = reshape(x_pred, (ns,nw))
+
+    for i in 1:K
+
+        Hw = @views Ms[i].Hw 
+        HwtV = @views Hw'*inv(Ms[i].Vw)
+        Hs = @views Ms[i].Hs
+        HstV = @views Hs'*inv(Ms[i].Vs) 
+
+        res_pred = @views ys[i] - Hs * x_predr * Hw' # innovation
+
+        HViH .+= kronecker(HwtV*Hw, HstV*Hs)
+        HVie .+= vec(HstV * res_pred * HwtV')
+    end
+
+    ## Woodbury Si 
+    # @time begin
+    #     S2 = inv(cholesky(P_pred)) + Symmetric(HViH);
+    #     S3 = HViH*inv(cholesky(S2));
+    # end
+
+    S = P_pred[:,:]
+    begin
+        LAPACK.potrf!('U', S)
+        LAPACK.potri!('U', S)
+        LinearAlgebra.copytri!(S,'U')
+    end
+    S .+= HViH;
+
+    LAPACK.potrf!('U', S)
+    LAPACK.potri!('U', S)
+    HtRHIi = BLAS.symm('R', 'U', S, HViH)
+
+    # @time F2 = P_pred*(I - HtRHIi);
+    
+    F .= P_pred;
+    mul!(F, P_pred, HtRHIi, -1.0, 1.0);
+
+    # @time x_new2 = x_pred .+ F*HVie; # filtering distribution mean
+
+    x_new .= x_pred
+    mul!(x_new, F, HVie, 1.0, 1.0)
+    
+    # @time P_new2 = (I - F*HViH)*P_pred; # filtering distribution covariance
+
+    # F .= F * HViH;
+    P_new .= P_pred
+    mul!(P_new, F * HViH, P_pred, -1.0, 1.0)
+end
+
+
 """
     smooth_series(F, predicted_means, predicted_covs, filtering_means, filtering_covs)
 
@@ -333,10 +416,10 @@ using both predicted and filtered states.
 
 # Arguments
 - `F::Union{AbstractMatrix{Float64}, UniformScaling{Float64}}`: The state transition matrix.
-- `predicted_means::AbstractVector{<:AbstractVector{Float64}}`: A vector of predicted state means from the filtering step.
-- `predicted_covs::AbstractVector{<:AbstractMatrix{Float64}}`: A vector of predicted state covariances from the filtering step.
-- `filtering_means::AbstractVector{<:AbstractVector{Float64}}`: A vector of filtered state means from the filtering step.
-- `filtering_covs::AbstractVector{<:AbstractMatrix{Float64}}`: A vector of filtered state covariances from the filtering step.
+- `predicted_means::AbstractArray{Float64}`: Array of predicted state means from the filtering step.
+- `predicted_covs::AbstractArray{Float64}`: Array of predicted state covariances from the filtering step.
+- `filtering_means::AbstractArray{Float64}`: Array of filtered state means from the filtering step.
+- `filtering_covs::AbstractArray{Float64}`: Array of filtered state covariances from the filtering step.
 
 # Returns
 - `smoothed_means::AbstractVector{<:AbstractVector{Float64}}`: A vector of smoothed state means.
@@ -354,65 +437,125 @@ For each time step `i` from `nsteps-1` down to `t0`:
     `P_smooth = filtering_covs[i] + C * (smoothed_covs[i+1] - predicted_covs[i+1]) * C'`
     The smoothed covariance is the filtered covariance plus a correction term based on the covariance difference and the smoother gain.
 """
-function smooth_series(F, predicted_means, predicted_covs, filtering_means, filtering_covs) 
+
+
+function smooth_series(F::Union{AbstractSparseMatrix{Float64},AbstractMatrix{Float64},UniformScaling{Float64}}, 
+    predicted_means::AbstractArray{Float64}, 
+    predicted_covs::AbstractArray{Float64}, 
+    filtering_means::AbstractArray{Float64}, 
+    filtering_covs::AbstractArray{Float64}) 
 
     # These arrays start at the final smoothed (= filtered) state
-    # The last filtered state is the same as the last smoothed state
-    smoothed_means = [filtering_means[end]]
-    smoothed_covs = [filtering_covs[end]]
+    nsteps = size(predicted_means,2) 
+    smoothed_means = similar(predicted_means)
+    smoothed_covs = similar(predicted_covs)
 
-    nsteps = length(predicted_means) # Total number of time steps (T in some notations)
-    t0 = 1 # Start index for processing (typically 1 for the first prediction)
+    @views smoothed_means[:,nsteps] = filtering_means[:,nsteps+1]
+    @views smoothed_covs[:,:,nsteps] = filtering_covs[:,:,nsteps+1]
 
-    # Iterate backwards from the second-to-last time step down to the first
-    for i ∈ nsteps:-1:(t0+1)
+    # First step that we are interested here in is i = nsteps - 1
+    for i ∈ nsteps:-1:2
         # NB. filtering_covs[i] is P_{i-1|i-1}, predicted_covs[i] is P_{i|i-1}
-        # Compute the smoother gain C = P_{i-1|i-1} * F' * P_{i|i-1}_inv
-        begin 
-            CC = predicted_covs[i][:,:] # Make a mutable copy for in-place inversion
-            LAPACK.potrf!('U', CC) # Cholesky factorization of predicted_covs[i]
-            LAPACK.potri!('U', CC) # Invert CC from its Cholesky factor (now holds inv(predicted_covs[i]))
-            C = zeros(size(predicted_covs[i])) # Pre-allocate C
-            # C = P_{i-1|i-1} * F' * inv(P_{i|i-1})
-            # BLAS.symm!('R', 'U', 1., CC, filtering_covs[i]*F', 0., C) performs C = alpha * A * B + beta * C
-            # Here, A = CC (inv(predicted_covs[i])), B = filtering_covs[i]*F', alpha=1, beta=0.
-            # Note: BLAS.symm! expects the first argument to be symmetric. CC is symmetric.
-            # But the order is (Left/Right, Upper/Lower, alpha, A, B, beta, C)
-            # 'R' means B is multiplied from the right, so C = A * B.
-            # It appears the BLAS call here calculates: C = inv(predicted_covs[i]) * (filtering_covs[i] * F')
-            # This is equivalent to C = P_{i-1|i-1} * F' * inv(P_{i|i-1}) if matrix multiplication order is adjusted.
-            # Assuming `BLAS.symm!('R', 'U', 1., CC, filtering_covs[i]*F', 0., C)` is intended to compute (filtering_covs[i]*F') * CC
-            # which would be (filtering_covs[i]*F') * inv(predicted_covs[i]). This is the standard RTS gain.
-            mul!(C, filtering_covs[i], F', 1.0, 0.0) # C = filtering_covs[i] * F'
-            mul!(C, C, CC) # C = (filtering_covs[i] * F') * inv(predicted_covs[i])
+        begin # C = filtering_covs[i] * F * inv(predicted_covs[i])
+            CC = predicted_covs[:,:,i]
+            LAPACK.potrf!('U', CC)
+            LAPACK.potri!('U', CC)
+            C = zeros(size(CC))
+            BLAS.symm!('R', 'U', 1., CC, filtering_covs[:,:,i]*F', 0., C)
         end
-        
-        # Smoothed mean: x_{i-1|T} = x_{i-1|i-1} + C * (x_{i|T} - x_{i|i-1})
-        # Note: `smoothed_means[nsteps - i + 1]` corresponds to `x_{i|T}` (the smoothed mean from the next time step, already computed)
-        # and `predicted_means[i]` corresponds to `x_{i|i-1}` (the predicted mean for the current step).
-        x_smooth = filtering_means[i] .+ C * (smoothed_means[nsteps - i + 1] .- predicted_means[i])
+        x_smooth = filtering_means[:,i] .+ C * (smoothed_means[:,i] .- predicted_means[:,i])
 
-        # Smoothed covariance: P_{i-1|T} = P_{i-1|i-1} + C * (P_{i|T} - P_{i|i-1}) * C'
-        # Note: `smoothed_covs[nsteps - i + 1]` is `P_{i|T}`.
-        # `predicted_covs[i]` is `P_{i|i-1}`.
+        # P_smooth = filtering_covs[i] + C * (smoothed_covs[nsteps - i + 1] - predicted_covs[i]) * C'
+        # Compute P_smooth = filtering_covs[i] + C *
+        # (smoothed_covs[nsteps - i + 1] - predicted_covs[i]) * C'
         begin
-            CC .= smoothed_covs[nsteps - i + 1] .- predicted_covs[i] # CC now holds (P_{i|T} - P_{i|i-1})
-            D = BLAS.symm('R', 'U', CC, C) # D = C * CC (if 'R' means B is multiplied from the right, i.e., D = CC * C).
-                                         # The standard formula is C * (P_{i|T} - P_{i|i-1}) * C'
-                                         # So this would be `mul!(D, C, CC)` and then `mul!(P_smooth, D, C')`.
-                                         # Let's use explicit `mul!` for clarity based on formula:
-            mul!(P_smooth, C, CC, 1.0, 0.0) # P_smooth = C * (P_{i|T} - P_{i|i-1})
-            mul!(P_smooth, P_smooth, C', 1.0, 0.0) # P_smooth = (C * (P_{i|T} - P_{i|i-1})) * C'
-            P_smooth .+= filtering_covs[i] # Add P_{i-1|i-1} to complete the formula
+            CC .= smoothed_covs[:,:,i] .- predicted_covs[:,:,i]
+            D = BLAS.symm('R', 'U', CC, C) # D = C * CC
+            CC .= filtering_covs[:,:,i]
+            P_smooth = BLAS.gemm!('N', 'T', 1., D, C, 1., CC)
         end
 
-        push!(smoothed_means, x_smooth)
-        push!(smoothed_covs, P_smooth)
+        smoothed_means[:,i-1] = x_smooth
+        smoothed_covs[:,:,i-1] = P_smooth
     end
 
-    # Reverse the arrays as they were populated in reverse chronological order
-    return reverse(smoothed_means), reverse(smoothed_covs)
+    return smoothed_means, smoothed_covs
 end
+
+# function smooth_series(F, predicted_means, predicted_covs, filtering_means, filtering_covs) 
+
+#     # These arrays start at the final smoothed (= filtered) state
+#     # The last filtered state is the same as the last smoothed state
+#     smoothed_means = [filtering_means[end]]
+#     smoothed_covs = [filtering_covs[end]]
+
+#     nsteps = length(predicted_means) # Total number of time steps (T in some notations)
+#     t0 = 1 # Start index for processing (typically 1 for the first prediction)
+
+#     # Iterate backwards from the second-to-last time step down to the first
+#     for i ∈ nsteps:-1:(t0+1)
+#         # NB. filtering_covs[i] is P_{i-1|i-1}, predicted_covs[i] is P_{i|i-1}
+#         # Compute the smoother gain C = P_{i-1|i-1} * F' * P_{i|i-1}_inv
+#         begin # C = filtering_covs[i] * F * inv(predicted_covs[i])
+#             CC = predicted_covs[i][:,:]
+#             LAPACK.potrf!('U', CC)
+#             LAPACK.potri!('U', CC)
+#             C = zeros(size(predicted_covs[i]))
+#             BLAS.symm!('R', 'U', 1., CC, filtering_covs[i]*F', 0., C)
+#         end
+
+#         # begin 
+#         #     CC = predicted_covs[i][:,:] # Make a mutable copy for in-place inversion
+#         #     LAPACK.potrf!('U', CC) # Cholesky factorization of predicted_covs[i]
+#         #     LAPACK.potri!('U', CC) # Invert CC from its Cholesky factor (now holds inv(predicted_covs[i]))
+#         #     C = zeros(size(predicted_covs[i])) # Pre-allocate C
+#         #     # C = P_{i-1|i-1} * F' * inv(P_{i|i-1})
+#         #     # BLAS.symm!('R', 'U', 1., CC, filtering_covs[i]*F', 0., C) performs C = alpha * A * B + beta * C
+#         #     # Here, A = CC (inv(predicted_covs[i])), B = filtering_covs[i]*F', alpha=1, beta=0.
+#         #     # Note: BLAS.symm! expects the first argument to be symmetric. CC is symmetric.
+#         #     # But the order is (Left/Right, Upper/Lower, alpha, A, B, beta, C)
+#         #     # 'R' means B is multiplied from the right, so C = A * B.
+#         #     # It appears the BLAS call here calculates: C = inv(predicted_covs[i]) * (filtering_covs[i] * F')
+#         #     # This is equivalent to C = P_{i-1|i-1} * F' * inv(P_{i|i-1}) if matrix multiplication order is adjusted.
+#         #     # Assuming `BLAS.symm!('R', 'U', 1., CC, filtering_covs[i]*F', 0., C)` is intended to compute (filtering_covs[i]*F') * CC
+#         #     # which would be (filtering_covs[i]*F') * inv(predicted_covs[i]). This is the standard RTS gain.
+#         #     mul!(C, filtering_covs[i], F', 1.0, 0.0) # C = filtering_covs[i] * F'
+#         #     mul!(C, C, CC) # C = (filtering_covs[i] * F') * inv(predicted_covs[i])
+#         # end
+        
+#         # Smoothed mean: x_{i-1|T} = x_{i-1|i-1} + C * (x_{i|T} - x_{i|i-1})
+#         # Note: `smoothed_means[nsteps - i + 1]` corresponds to `x_{i|T}` (the smoothed mean from the next time step, already computed)
+#         # and `predicted_means[i]` corresponds to `x_{i|i-1}` (the predicted mean for the current step).
+#         x_smooth = filtering_means[i] .+ C * (smoothed_means[nsteps - i + 1] .- predicted_means[i])
+
+#         # Smoothed covariance: P_{i-1|T} = P_{i-1|i-1} + C * (P_{i|T} - P_{i|i-1}) * C'
+#         # Note: `smoothed_covs[nsteps - i + 1]` is `P_{i|T}`.
+#         # `predicted_covs[i]` is `P_{i|i-1}`.
+#         begin
+#             CC .= smoothed_covs[nsteps - i + 1] .- predicted_covs[i]
+#             D = BLAS.symm('R', 'U', CC, C) # D = C * CC
+#             CC .= filtering_covs[i]
+#             P_smooth = BLAS.gemm!('N', 'T', 1., D, C, 1., CC)
+
+#             # CC .= smoothed_covs[nsteps - i + 1] .- predicted_covs[i] # CC now holds (P_{i|T} - P_{i|i-1})
+#             # D = BLAS.symm('R', 'U', CC, C) # D = C * CC (if 'R' means B is multiplied from the right, i.e., D = CC * C).
+#             #                              # The standard formula is C * (P_{i|T} - P_{i|i-1}) * C'
+#             #                              # So this would be `mul!(D, C, CC)` and then `mul!(P_smooth, D, C')`.
+#             #                              # Let's use explicit `mul!` for clarity based on formula:
+#             # mul!(P_smooth, C, CC, 1.0, 0.0) # P_smooth = C * (P_{i|T} - P_{i|i-1})
+#             # mul!(P_smooth, P_smooth, C', 1.0, 0.0) # P_smooth = (C * (P_{i|T} - P_{i|i-1})) * C'
+#             # P_smooth .+= filtering_covs[i] # Add P_{i-1|i-1} to complete the formula
+#         end
+
+#         push!(smoothed_means, x_smooth)
+#         push!(smoothed_covs, P_smooth)
+#     end
+
+#     # Reverse the arrays as they were populated in reverse chronological order
+#     return reverse(smoothed_means), reverse(smoothed_covs)
+# end
+
+
 
 """
     organize_data(full_ext, inst_geodata, inst_data, target_geodata, ss_xy, ss_ij, res_flag)
@@ -545,39 +688,247 @@ spatial and spectral correlations and handling multiple instrument measurements.
 - `fused_sd_image::AbstractArray{Float64}`: The fused standard deviation image (uncertainty)
   for the target times, in the same format as `fused_image`.
 """
+# function hyperSTARS_fusion_kr_dict(d,  
+#                 target_wavelengths::AbstractVector{<:Real},
+#                 spectral_mean::AbstractVector{<:Real},   
+#                 B::AbstractArray{<:Real}, # Spectral basis matrix (e.g., PCA loadings)
+#                 target_times::Union{AbstractVector{<:Real}, UnitRange{<:Real}} = [1],
+#                 smooth::Bool = false, # Flag to enable/disable smoothing
+#                 spatial_mod::Function = mat32_corD, # Function for spatial covariance (e.g., Matern)                                         
+#                 obs_operator::Function = unif_weighted_obs_operator, # Function to create spatial observation operator
+#                 state_in_cov::Bool = true, # Flag to adaptively update process noise covariance based on state
+#                 cov_wt::Real = 0.3, # Weight for combining fixed and state-dependent Q
+#                 ar_phi = 1.0) # Autoregressive parameter for temporal transition
+
+#     # Unpack data from the input dictionary `d`
+#     measurements = @views d[:measurements] # Subsetted instrument data
+#     target_coords = @views d[:target_coords] # Spatial coordinates of BAUs in the current window
+#     kp_ij = @views d[:kp_ij] # Cartesian indices of the target partition BAUs
+#     prior_mean = @views d[:prior_mean] # Initial prior mean of the state
+#     prior_var = @views d[:prior_var] # Initial prior variance of the state
+#     model_pars = @views d[:model_pars] # Parameters for spatial covariance models
+
+#     nbau = size(kp_ij,1) # Number of Basic Area Units (BAUs) in the target partition
+#     ni = size(measurements)[1] # Number of instruments/measurement types
+#     nf = size(target_coords)[1] # Number of BAUs in the *full* window (target + buffer)
+
+#     p = size(B)[2] # Number of latent spectral components (e.g., PCA components)
+    
+#     # Pre-allocate arrays to store instrument-specific information
+#     nnobs = Vector{Int64}(undef, ni) # Number of spatial observations for each instrument
+#     nwobs = Vector{Int64}(undef, ni) # Number of wavelength observations for each instrument
+#     t0v = Vector{Int64}(undef, ni) # Start date of observations for each instrument
+#     ttv = Vector{Int64}(undef, ni) # End date of observations for each instrument
+
+#     # Populate instrument-specific observation dimensions and time ranges
+#     for i in 1:ni
+#         nnobs[i] = size(measurements[i].data)[1]
+#         nwobs[i] = size(measurements[i].data)[2]
+#         t0v[i] = measurements[i].dates[1]
+#         ttv[i] = measurements[i].dates[end]
+#     end
+
+#     # Determine the overall temporal range for the fusion
+#     t0 = minimum(t0v) # Earliest observation date
+#     tt = maximum(ttv) # Latest observation date
+#     tp = maximum(target_times) # Latest target time for output
+#     tpl = minimum(target_times) # Earliest target time for output
+
+#     # Define the full sequence of time steps for filtering/smoothing
+#     if smooth
+#         times = minimum([t0,tpl]):maximum([tt,tp])
+#     else
+#         times = minimum([t0,tpl]):tp
+#     end
+#     nsteps = size(times)[1] # Total number of time steps in the fusion process
+    
+#     data_kp = falses(ni,nsteps) # Boolean matrix: data_kp[i,t] is true if instrument i has data at time t
+   
+#     ## Build observation operators (Hw, Hs) and spectral mean adjustments (Hm)
+#     Hws = Vector(undef,ni) # Hw: Spectral observation operator for each instrument
+#     Hms = Vector(undef,ni) # Hm: Spectral mean adjustment for each instrument
+#     Hss = Vector(undef,ni) # Hs: Spatial observation operator for each instrument
+
+#     for (i,x) in enumerate(measurements)
+#         # Hss[i]: Spatial observation operator, mapping latent spatial states to observed locations.
+#         # This function (e.g., `unif_weighted_obs_operator`) accounts for differences
+#         # between instrument observation footprints and target grid cell locations.
+#         Hss[i] = obs_operator(x.coords, target_coords, x.spatial_resolution) 
+        
+#         # Hw: Spectral response function convolution matrix.
+#         # It maps the target latent spectral components (B) to the instrument's observed wavelengths.
+#         # `rsr_conv_matrix` applies the instrument's RSR.
+#         Hw = rsr_conv_matrix(x.rsr, x.wavelengths, target_wavelengths)
+#         Hws[i] = Hw*B # Hw * B transforms the latent spectral states to instrument's spectral space.
+#         Hms[i] = Hw*spectral_mean # Hw * spectral_mean for bias correction in observation space.
+        
+#         # Mark time steps where each instrument has data
+#         data_kp[i,in(measurements[i].dates).(times)] .= true
+#     end
+
+#     # --- Process Noise Covariance (Q) ---
+#     # Q describes the uncertainty in the state evolution between time steps.
+#     # Here, Q is built from spatial covariance models for each latent spectral component.
+#     Qs = Vector{Matrix{Float64}}(undef,size(model_pars)[1]) # Qs for each latent component
+#     # `pairwise` calculates Euclidean distances between target coordinates, which is input to spatial covariance functions.
+#     dd = pairwise(Euclidean(1e-12), target_coords', dims=2) 
+#     for (i,x) in enumerate(eachrow(model_pars))
+#         # x[1] is the variance (amplitude) and x[2:end] are parameters (e.g., length scales) for `spatial_mod`.
+#         Qs[i] = x[1] .* spatial_mod(dd, x[2:end]) 
+#     end
+#     # Form a block-diagonal matrix Q, assuming independence between latent spectral components (or transformed components).
+#     Q = Matrix(BlockDiagonal(Qs))
+
+#     ## Diagonal transition matrices (F)
+#     # F describes how the state propagates from one time step to the next.
+#     # UniformScaling(ar_phi) implies a simple autoregressive (AR(1)) model for each state component.
+#     F = UniformScaling(ar_phi)
+
+#     # --- Initial State and Covariance ---
+#     x0 = prior_mean[:] # Initial state mean (vectorized)
+#     P0 = Diagonal(prior_var[:]) # Initial state covariance (assumed diagonal)
+
+#     # --- Arrays to store filtering and prediction results ---
+#     filtering_means = Vector{Vector{Float64}}(undef, 0)
+#     predicted_means = Vector{Vector{Float64}}(undef, 0)
+#     filtering_covs = Vector{Matrix{Float64}}(undef, 0)
+#     predicted_covs = Vector{Matrix{Float64}}(undef, 0)
+    
+#     # Initialize with the prior at t=0
+#     push!(filtering_means, x0)
+#     push!(filtering_covs, P0)
+
+#     # Pre-allocate output arrays for fused images
+#     fused_image = zeros(nbau,p,size(target_times,1))
+#     fused_sd_image = zeros(nbau,p,size(target_times,1))
+
+#     # Find indices of `times` that correspond to `target_times` (for outputting results)
+#     kp_times = findall(times .∈ Ref(target_times))
+
+#     ## Main Kalman Filtering Loop
+#     # Iterates through each time step defined by `times`
+#     for (t,t2) in enumerate(times)
+#         # --- Process Noise Covariance Update (Qf) ---
+#         # Optionally make the process noise covariance adaptive based on previous state estimates.
+#         if state_in_cov ## update this to weighted past
+#             # Xtt gathers past filtered means, reshaped to (spatial_dim, spectral_dim, time_dim)
+#             Xtt = cat([reshape(x, (nf,p)) for x in filtering_means[1:t]]..., dims=3)
+#             # Wt are weights based on inverse square root of diagonal of filtering covariances (uncertainty).
+#             # Lower uncertainty gives higher weight.
+#             Wt = cat([reshape(1.0 ./ sqrt.(diag(x)), (nf,p)) for x in filtering_covs[1:t]]...,dims=3)
+#             Wtn = sum(Wt, dims=3) # Sum of weights for normalization
+#             Wt ./= Wtn # Normalize weights
+#             Xtt .*= Wt # Apply weights to state estimates
+
+#             # Compute state-dependent spatial covariance (Qss)
+#             # `state_cov` likely computes a covariance matrix for each latent component
+#             # based on the (weighted) past states of that component.
+#             Qst = Vector{Matrix{Float64}}(undef,p)
+#             for (i,x) in enumerate(eachrow(model_pars))
+#                 Qst[i] = state_cov(Xtt[:,i,:]',x)
+#             end
+#             Qss = Matrix(BlockDiagonal(Qst)) # Form block-diagonal state-dependent Qss
+
+#             # Combine the fixed Q and state-dependent Qss using `cov_wt`
+#             Qf = cov_wt .* Q .+ (1-cov_wt) .* Qss
+#         else
+#             Qf = Q # If not adaptive, use the fixed Q
+#         end
+
+#         # --- Prepare Observations for Current Time Step ---
+#         Ms = HSModel[] # Vector to hold HSModel instances for instruments with data at this time
+#         ys = Vector{Array{Float64}}() # Vector to hold corresponding observation arrays
+
+#         # Identify instruments that have data at the current time step `t2`
+#         for x in findall(data_kp[:,t])
+#             yss = @views measurements[x].data[:,:,measurements[x].dates .== t2] # Extract measurements for current time
+#             ym = .!vec(any(isnan, yss; dims=2)) # Find rows (spatial samples) without NaNs
+#             Hs2 = Hss[x][ym,:] # Subset spatial observation operator for valid samples
+
+#             # Construct HSModel for the current instrument at this time step
+#             push!(Ms, HSModel(Hws[x], Hs2, Diagonal(measurements[x].uq[:]), 1.0*I(size(Hs2,1)), Qf, F))
+#             # Push the observed data, adjusted by the spectral mean bias, for valid samples
+#             push!(ys,yss[ym,:] .- Hms[x]');
+#         end
+
+#         # --- Kalman Prediction Step ---
+#         # Predict the next state mean: x_pred = F * x_{t-1|t-1}
+#         x_pred = F * filtering_means[t] 
+#         # Predict the next state covariance: P_pred = F * P_{t-1|t-1} * F' + Qf
+#         P_pred = F * filtering_covs[t] * F' + Qf
+#         push!(predicted_means, x_pred)
+#         push!(predicted_covs, P_pred)
+
+#         # --- Kalman Filtering (Update) Step ---
+#         if length(ys) == 0 # No measurements available at this time step
+#             push!(filtering_means, x_pred) # Filtered state is just the predicted state
+#             push!(filtering_covs, P_pred) # Filtered covariance is just the predicted covariance
+#         else # Measurements are available
+#             # Call the `woodbury_filter_kr` function to perform the update
+#             x_new, P_new = woodbury_filter_kr(Ms, ys, x_pred, P_pred)
+#             push!(filtering_means, x_new)
+#             push!(filtering_covs, P_new)
+#         end
+#     end
+
+#     # --- Kalman Smoothing Step (if `smooth` is true) ---
+#     if smooth
+#         # Determine the starting index for smoothing.
+#         # `st` is the minimum index in `times` that corresponds to a `target_time`.
+#         # This ensures smoothing only occurs over the relevant output time range.
+#         st = minimum(kp_times) 
+#         # Call `smooth_series` using the relevant subsets of predicted and filtered results
+#         smoothed_means, smoothed_covs = smooth_series(F, predicted_means[st:end], predicted_covs[st:end], filtering_means[st:end], filtering_covs[st:end])
+        
+#         # Populate the `fused_image` and `fused_sd_image` with smoothed results
+#         for (ti,t2) in enumerate(kp_times .- st .+ 1) # Adjust index for `smoothed_means/covs` array
+#             # Reshape the smoothed mean from vector to (spatial_dim, spectral_dim) and subset to `nbau`
+#             fused_image[:,:,ti] = @views reshape(smoothed_means[t2],(nf,p))[1:nbau,:] 
+#             # Reshape the square root of diagonal elements of smoothed covariance (standard deviation)
+#             fused_sd_image[:,:,ti] = @views reshape(sqrt.(diag(smoothed_covs[t2])),(nf,p))[1:nbau,:]
+#         end
+#     else # No smoothing, use filtering results directly
+#         # Populate `fused_image` and `fused_sd_image` with filtering results
+#         for (ti,t2) in enumerate(kp_times)
+#             # `t2+1` because `filtering_means` is indexed from t=0 (prior) to t=nsteps (final filtered)
+#             fused_image[:,:,ti] = @views reshape(filtering_means[t2+1],(nf,p))[1:nbau,:] 
+#             fused_sd_image[:,:,ti] = @views reshape(sqrt.(diag(filtering_covs[t2+1])),(nf,p))[1:nbau,:]
+#         end
+#     end    
+#     return kp_ij, fused_image, fused_sd_image           
+# end
+
+
 function hyperSTARS_fusion_kr_dict(d,  
                 target_wavelengths::AbstractVector{<:Real},
                 spectral_mean::AbstractVector{<:Real},   
-                B::AbstractArray{<:Real}, # Spectral basis matrix (e.g., PCA loadings)
+                B::AbstractArray{<:Real},
                 target_times::Union{AbstractVector{<:Real}, UnitRange{<:Real}} = [1],
-                smooth::Bool = false, # Flag to enable/disable smoothing
-                spatial_mod::Function = mat32_corD, # Function for spatial covariance (e.g., Matern)                                         
-                obs_operator::Function = unif_weighted_obs_operator, # Function to create spatial observation operator
-                state_in_cov::Bool = true, # Flag to adaptively update process noise covariance based on state
-                cov_wt::Real = 0.3, # Weight for combining fixed and state-dependent Q
-                ar_phi = 1.0) # Autoregressive parameter for temporal transition
+                smooth::Bool = false,
+                spatial_mod::Function = mat32_corD,                                         
+                obs_operator::Function = unif_weighted_obs_operator,
+                state_in_cov::Bool = true,
+                cov_wt::Real = 0.3,
+                ar_phi = 1.0) 
 
-    # Unpack data from the input dictionary `d`
-    measurements = @views d[:measurements] # Subsetted instrument data
-    target_coords = @views d[:target_coords] # Spatial coordinates of BAUs in the current window
-    kp_ij = @views d[:kp_ij] # Cartesian indices of the target partition BAUs
-    prior_mean = @views d[:prior_mean] # Initial prior mean of the state
-    prior_var = @views d[:prior_var] # Initial prior variance of the state
-    model_pars = @views d[:model_pars] # Parameters for spatial covariance models
+    measurements = @views d[:measurements]
+    target_coords = @views d[:target_coords]
+    kp_ij = @views d[:kp_ij]
+    prior_mean = @views d[:prior_mean]
+    prior_var = @views d[:prior_var]
+    model_pars = @views d[:model_pars]
 
-    nbau = size(kp_ij,1) # Number of Basic Area Units (BAUs) in the target partition
-    ni = size(measurements)[1] # Number of instruments/measurement types
-    nf = size(target_coords)[1] # Number of BAUs in the *full* window (target + buffer)
+    nbau = size(kp_ij,1)
+    ni = size(measurements)[1] 
+    # println(ni)
+    nf = size(target_coords)[1] # number of target resolution grid cells
 
-    p = size(B)[2] # Number of latent spectral components (e.g., PCA components)
-    
-    # Pre-allocate arrays to store instrument-specific information
-    nnobs = Vector{Int64}(undef, ni) # Number of spatial observations for each instrument
-    nwobs = Vector{Int64}(undef, ni) # Number of wavelength observations for each instrument
-    t0v = Vector{Int64}(undef, ni) # Start date of observations for each instrument
-    ttv = Vector{Int64}(undef, ni) # End date of observations for each instrument
+    p = size(B)[2]
+    nnobs = Vector{Int64}(undef, ni)
+    nwobs = Vector{Int64}(undef, ni)
+    t0v = Vector{Int64}(undef, ni)
+    ttv = Vector{Int64}(undef, ni)
 
-    # Populate instrument-specific observation dimensions and time ranges
     for i in 1:ni
         nnobs[i] = size(measurements[i].data)[1]
         nwobs[i] = size(measurements[i].data)[2]
@@ -585,174 +936,166 @@ function hyperSTARS_fusion_kr_dict(d,
         ttv[i] = measurements[i].dates[end]
     end
 
-    # Determine the overall temporal range for the fusion
-    t0 = minimum(t0v) # Earliest observation date
-    tt = maximum(ttv) # Latest observation date
-    tp = maximum(target_times) # Latest target time for output
-    tpl = minimum(target_times) # Earliest target time for output
+    t0 = minimum(t0v)
+    tt = maximum(ttv)
+    tp = maximum(target_times);
+    tpl = minimum(target_times)
 
-    # Define the full sequence of time steps for filtering/smoothing
     if smooth
         times = minimum([t0,tpl]):maximum([tt,tp])
     else
         times = minimum([t0,tpl]):tp
     end
-    nsteps = size(times)[1] # Total number of time steps in the fusion process
-    
-    data_kp = falses(ni,nsteps) # Boolean matrix: data_kp[i,t] is true if instrument i has data at time t
-   
-    ## Build observation operators (Hw, Hs) and spectral mean adjustments (Hm)
-    Hws = Vector(undef,ni) # Hw: Spectral observation operator for each instrument
-    Hms = Vector(undef,ni) # Hm: Spectral mean adjustment for each instrument
-    Hss = Vector(undef,ni) # Hs: Spatial observation operator for each instrument
+
+    nsteps = size(times)[1]
+
+    data_kp = falses(ni,nsteps)
+
+    ## build observation operator, stack observations and variances 
+    Hws = Vector(undef,ni)
+    Hms = Vector(undef,ni)
+    Hss = Vector(undef,ni)
 
     for (i,x) in enumerate(measurements)
-        # Hss[i]: Spatial observation operator, mapping latent spatial states to observed locations.
-        # This function (e.g., `unif_weighted_obs_operator`) accounts for differences
-        # between instrument observation footprints and target grid cell locations.
-        Hss[i] = obs_operator(x.coords, target_coords, x.spatial_resolution) 
-        
-        # Hw: Spectral response function convolution matrix.
-        # It maps the target latent spectral components (B) to the instrument's observed wavelengths.
-        # `rsr_conv_matrix` applies the instrument's RSR.
+        Hss[i] = obs_operator(x.coords, target_coords, x.spatial_resolution) # kwargs for uniform needs :target_resolution, # kwargs for gaussian needs :scale, :p
         Hw = rsr_conv_matrix(x.rsr, x.wavelengths, target_wavelengths)
-        Hws[i] = Hw*B # Hw * B transforms the latent spectral states to instrument's spectral space.
-        Hms[i] = Hw*spectral_mean # Hw * spectral_mean for bias correction in observation space.
-        
-        # Mark time steps where each instrument has data
+        Hws[i] = Hw*B
+        Hms[i] = Hw*spectral_mean  
         data_kp[i,in(measurements[i].dates).(times)] .= true
     end
 
-    # --- Process Noise Covariance (Q) ---
-    # Q describes the uncertainty in the state evolution between time steps.
-    # Here, Q is built from spatial covariance models for each latent spectral component.
-    Qs = Vector{Matrix{Float64}}(undef,size(model_pars)[1]) # Qs for each latent component
-    # `pairwise` calculates Euclidean distances between target coordinates, which is input to spatial covariance functions.
-    dd = pairwise(Euclidean(1e-12), target_coords', dims=2) 
-    for (i,x) in enumerate(eachrow(model_pars))
-        # x[1] is the variance (amplitude) and x[2:end] are parameters (e.g., length scales) for `spatial_mod`.
-        Qs[i] = x[1] .* spatial_mod(dd, x[2:end]) 
-    end
-    # Form a block-diagonal matrix Q, assuming independence between latent spectral components (or transformed components).
-    Q = Matrix(BlockDiagonal(Qs))
+    n = nf*p 
 
-    ## Diagonal transition matrices (F)
-    # F describes how the state propagates from one time step to the next.
-    # UniformScaling(ar_phi) implies a simple autoregressive (AR(1)) model for each state component.
+    Q = zeros(n,n)
+
+    # Qs = Vector{Matrix{Float64}}(undef,size(model_pars)[1])
+    dd = pairwise(Euclidean(1e-12), target_coords, dims=1)
+    for (i,x) in enumerate(eachrow(model_pars))
+        ids = ((i-1)*nf+1):i*nf
+        @views Q[ids,ids] = x[1] .* spatial_mod(dd, x[2:end]) 
+    end
+
+    ## Diagonal transition matrices
     F = UniformScaling(ar_phi)
 
-    # --- Initial State and Covariance ---
-    x0 = prior_mean[:] # Initial state mean (vectorized)
-    P0 = Diagonal(prior_var[:]) # Initial state covariance (assumed diagonal)
+    # x0 = prior_mean[:] # don't need this but here to help with synergizing code later
+    # P0 = Diagonal(prior_var[:]) # just assuming diagonal C0
 
-    # --- Arrays to store filtering and prediction results ---
-    filtering_means = Vector{Vector{Float64}}(undef, 0)
-    predicted_means = Vector{Vector{Float64}}(undef, 0)
-    filtering_covs = Vector{Matrix{Float64}}(undef, 0)
-    predicted_covs = Vector{Matrix{Float64}}(undef, 0)
-    
-    # Initialize with the prior at t=0
-    push!(filtering_means, x0)
-    push!(filtering_covs, P0)
+    filtering_means = zeros(n,nsteps+1)
+    filtering_covs = zeros(n,n,nsteps+1)
+    filtering_prec = zeros(n,nsteps+1)
 
-    # Pre-allocate output arrays for fused images
+    predicted_means = zeros(n,nsteps)
+    predicted_covs = zeros(n,n,nsteps)
+
+    @views filtering_means[:,1] = prior_mean
+    @views filtering_covs[:,:,1] = Diagonal(prior_var)
+    @views filtering_prec[:,1] = 1.0 ./ sqrt.(prior_var)
+
+    # filtering_means = Vector{Vector{Float64}}(undef, 0)
+    # predicted_means = Vector{Vector{Float64}}(undef, 0)
+    # filtering_covs = Vector{Matrix{Float64}}(undef, 0)
+    # predicted_covs = Vector{Matrix{Float64}}(undef, 0)
+    # push!(filtering_means, prior_mean[:])
+    # push!(filtering_covs, Diagonal(prior_var[:]))
+
     fused_image = zeros(nbau,p,size(target_times,1))
     fused_sd_image = zeros(nbau,p,size(target_times,1))
 
-    # Find indices of `times` that correspond to `target_times` (for outputting results)
     kp_times = findall(times .∈ Ref(target_times))
 
-    ## Main Kalman Filtering Loop
-    # Iterates through each time step defined by `times`
+    x_pred = zeros(n)
+    P_pred = zeros(n,n)
+    x_new = zeros(n)
+    P_new = zeros(n,n)
+
+    FPpred = similar(P_pred)
+
+    Qf = zeros(n,n)
+
+    HS_helpers = HSModel_helpers(zeros(n,n), zeros(n), zeros(n,n))
+
+    ## bunch of reusable memory in here...
     for (t,t2) in enumerate(times)
-        # --- Process Noise Covariance Update (Qf) ---
-        # Optionally make the process noise covariance adaptive based on previous state estimates.
-        if state_in_cov ## update this to weighted past
-            # Xtt gathers past filtered means, reshaped to (spatial_dim, spectral_dim, time_dim)
-            Xtt = cat([reshape(x, (nf,p)) for x in filtering_means[1:t]]..., dims=3)
-            # Wt are weights based on inverse square root of diagonal of filtering covariances (uncertainty).
-            # Lower uncertainty gives higher weight.
-            Wt = cat([reshape(1.0 ./ sqrt.(diag(x)), (nf,p)) for x in filtering_covs[1:t]]...,dims=3)
-            Wtn = sum(Wt, dims=3) # Sum of weights for normalization
-            Wt ./= Wtn # Normalize weights
-            Xtt .*= Wt # Apply weights to state estimates
+        Qf .= Q
 
-            # Compute state-dependent spatial covariance (Qss)
-            # `state_cov` likely computes a covariance matrix for each latent component
-            # based on the (weighted) past states of that component.
-            Qst = Vector{Matrix{Float64}}(undef,p)
+        if state_in_cov 
+            Qf .*= cov_wt
+
+            # Xtt = cat([reshape(x, (nf,p)) for x in filtering_means[:,1:t]]..., dims=3)
+            # Wt = cat([reshape(1.0 ./ sqrt.(diag(x)), (nf,p)) for x in filtering_covs[1:t]]...,dims=3)
+
+            Xtt = reshape(filtering_means[:,1:t], (nf,p,t))[:,:,:]
+            Wt = @views reshape(filtering_prec[:,1:t], (nf,p,t))
+
+            Xtt .*= Wt
+            Xtt ./= sum(Wt, dims=3)
+
+            # Qst = Vector{Matrix{Float64}}(undef,p)
             for (i,x) in enumerate(eachrow(model_pars))
-                Qst[i] = state_cov(Xtt[:,i,:]',x)
+                ids = ((i-1)*nf+1):i*nf
+                @views Qf[ids,ids] .+= state_cov(Xtt[:,i,:]',x) .* (1.0 .- cov_wt)
+                # Qst[i] = state_cov(Xtt[:,i,:]',x)
             end
-            Qss = Matrix(BlockDiagonal(Qst)) # Form block-diagonal state-dependent Qss
+        
+            # Qss = Matrix(BlockDiagonal(Qst)*(1-cov_wt))
 
-            # Combine the fixed Q and state-dependent Qss using `cov_wt`
-            Qf = cov_wt .* Q .+ (1-cov_wt) .* Qss
-        else
-            Qf = Q # If not adaptive, use the fixed Q
+            # Qf = cov_wt .* Q .+ (1-cov_wt) .* Qss
+            # Qf *= cov_wt
+            # Qf .+= Qss
+
         end
 
-        # --- Prepare Observations for Current Time Step ---
-        Ms = HSModel[] # Vector to hold HSModel instances for instruments with data at this time
-        ys = Vector{Array{Float64}}() # Vector to hold corresponding observation arrays
+        Ms = HyperSTARS.HSModel[]
 
-        # Identify instruments that have data at the current time step `t2`
+        ys = Vector{Array{Float64}}()
         for x in findall(data_kp[:,t])
-            yss = @views measurements[x].data[:,:,measurements[x].dates .== t2] # Extract measurements for current time
-            ym = .!vec(any(isnan, yss; dims=2)) # Find rows (spatial samples) without NaNs
-            Hs2 = Hss[x][ym,:] # Subset spatial observation operator for valid samples
+            yss = @views measurements[x].data[:,:,measurements[x].dates .== t2]
+            ym = .!vec(any(isnan, yss; dims=2))
+            Hs2 = Hss[x][ym,:]
 
-            # Construct HSModel for the current instrument at this time step
-            push!(Ms, HSModel(Hws[x], Hs2, Diagonal(measurements[x].uq[:]), 1.0*I(size(Hs2,1)), Qf, F))
-            # Push the observed data, adjusted by the spectral mean bias, for valid samples
+            push!(Ms, HyperSTARS.HSModel(Hws[x], Hs2, Diagonal(measurements[x].uq[:]), 1.0*I(size(Hs2,1)), Qf, F))
             push!(ys,yss[ym,:] .- Hms[x]');
         end
 
-        # --- Kalman Prediction Step ---
-        # Predict the next state mean: x_pred = F * x_{t-1|t-1}
-        x_pred = F * filtering_means[t] 
-        # Predict the next state covariance: P_pred = F * P_{t-1|t-1} * F' + Qf
-        P_pred = F * filtering_covs[t] * F' + Qf
-        push!(predicted_means, x_pred)
-        push!(predicted_covs, P_pred)
+        # Predictive mean and covariance here
+        # x_pred = F * filtering_means[:,t] # filtering_means[1], covs[1] is prior mean
+        # P_pred = F * filtering_covs[:,:,t] * F' + Qf
+        P_pred .= Qf
+        mul!(x_pred, F, @view(filtering_means[:,t]))
+        mul!(FPpred, F, @view(filtering_covs[:,:,t]))
+        mul!(P_pred, FPpred, F', 1.0, 1.0)
 
-        # --- Kalman Filtering (Update) Step ---
-        if length(ys) == 0 # No measurements available at this time step
-            push!(filtering_means, x_pred) # Filtered state is just the predicted state
-            push!(filtering_covs, P_pred) # Filtered covariance is just the predicted covariance
-        else # Measurements are available
-            # Call the `woodbury_filter_kr` function to perform the update
-            x_new, P_new = woodbury_filter_kr(Ms, ys, x_pred, P_pred)
-            push!(filtering_means, x_new)
-            push!(filtering_covs, P_new)
+        predicted_means[:,t] = x_pred
+        predicted_covs[:,:,t] = P_pred
+
+        # Filtering is done here
+        if length(ys) == 0
+            filtering_means[:,t+1] = x_pred
+            filtering_covs[:,:,t+1] = P_pred
+            filtering_prec[:,t+1] = 1.0 ./ sqrt.(diag(P_pred))
+        else
+            woodbury_filter_kr!(x_new, P_new, Ms, HS_helpers, ys, x_pred, P_pred)
+            filtering_means[:,t+1] = x_new
+            filtering_covs[:,:,t+1] = P_new
+            filtering_prec[:,t+1] = 1.0 ./ sqrt.(diag(P_new))
         end
     end
 
-    # --- Kalman Smoothing Step (if `smooth` is true) ---
     if smooth
-        # Determine the starting index for smoothing.
-        # `st` is the minimum index in `times` that corresponds to a `target_time`.
-        # This ensures smoothing only occurs over the relevant output time range.
-        st = minimum(kp_times) 
-        # Call `smooth_series` using the relevant subsets of predicted and filtered results
-        smoothed_means, smoothed_covs = smooth_series(F, predicted_means[st:end], predicted_covs[st:end], filtering_means[st:end], filtering_covs[st:end])
-        
-        # Populate the `fused_image` and `fused_sd_image` with smoothed results
-        for (ti,t2) in enumerate(kp_times .- st .+ 1) # Adjust index for `smoothed_means/covs` array
-            # Reshape the smoothed mean from vector to (spatial_dim, spectral_dim) and subset to `nbau`
-            fused_image[:,:,ti] = @views reshape(smoothed_means[t2],(nf,p))[1:nbau,:] 
-            # Reshape the square root of diagonal elements of smoothed covariance (standard deviation)
-            fused_sd_image[:,:,ti] = @views reshape(sqrt.(diag(smoothed_covs[t2])),(nf,p))[1:nbau,:]
+        st = minimum(kp_times)
+        smoothed_means, smoothed_covs = smooth_series(F, predicted_means[:,st:end], predicted_covs[:,:,st:end], filtering_means[:,st:end], filtering_covs[:,:,st:end])
+        for (ti,t2) in enumerate(kp_times .- st .+ 1)
+            fused_image[:,:,ti] = @views reshape(smoothed_means[:,t2],(nf,p))[1:nbau,:] 
+            fused_sd_image[:,:,ti] = @views reshape(sqrt.(diag(smoothed_covs[:,:,t2])),(nf,p))[1:nbau,:]
         end
-    else # No smoothing, use filtering results directly
-        # Populate `fused_image` and `fused_sd_image` with filtering results
+    else
         for (ti,t2) in enumerate(kp_times)
-            # `t2+1` because `filtering_means` is indexed from t=0 (prior) to t=nsteps (final filtered)
-            fused_image[:,:,ti] = @views reshape(filtering_means[t2+1],(nf,p))[1:nbau,:] 
-            fused_sd_image[:,:,ti] = @views reshape(sqrt.(diag(filtering_covs[t2+1])),(nf,p))[1:nbau,:]
+            fused_image[:,:,ti] = @views reshape(filtering_means[:,t2+1],(nf,p))[1:nbau,:] 
+            fused_sd_image[:,:,ti] = @views reshape(sqrt.(diag(filtering_covs[:,:,t2+1])),(nf,p))[1:nbau,:]
         end
-    end    
-    return kp_ij, fused_image, fused_sd_image           
+    end  
+    return kp_ij, fused_image, fused_sd_image   
 end
 
 """
@@ -1001,6 +1344,7 @@ function scene_fusion_pmap(inst_data::AbstractVector{InstrumentData},
     end
     
     return fused_image, fused_sd_image
+
 end
 
 end # end of module
