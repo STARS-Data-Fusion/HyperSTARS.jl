@@ -909,6 +909,7 @@ function hyperSTARS_fusion_kr_dict(d,
                 obs_operator::Function = unif_weighted_obs_operator,
                 state_in_cov::Bool = true,
                 cov_wt::Real = 0.3,
+                tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
                 ar_phi = 1.0) 
 
     measurements = @views d[:measurements]
@@ -1032,9 +1033,10 @@ function hyperSTARS_fusion_kr_dict(d,
             Xtt ./= sum(Wt, dims=3)
 
             # Qst = Vector{Matrix{Float64}}(undef,p)
-            for (i,x) in enumerate(eachrow(model_pars))
+            for (i,x) in enumerate(tscov_pars)
                 ids = ((i-1)*nf+1):i*nf
-                @views Qf[ids,ids] .+= state_cov(Xtt[:,i,:]',x) .* (1.0 .- cov_wt)
+                x2 = [model_pars[i,1], x]
+                @views Qf[ids,ids] .+= state_cov(Xtt[:,i,:]',x2) .* (1.0 .- cov_wt)
                 # Qst[i] = state_cov(Xtt[:,i,:]',x)
             end
         
@@ -1259,7 +1261,8 @@ function scene_fusion_pmap(inst_data::AbstractVector{InstrumentData},
                       spatial_mod::Function = mat32_corD,                                           
                       obs_operator::Function = unif_weighted_obs_operator,
                       state_in_cov::Bool = true,
-                      cov_wt::Real = 0.7,
+                      cov_wt::Real = 0.3,
+                      tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
                       ar_phi::Real = 1.0,
                       nb_coarse::Real = 2.0)
 
@@ -1331,7 +1334,7 @@ function scene_fusion_pmap(inst_data::AbstractVector{InstrumentData},
     result = @showprogress pmap(x -> hyperSTARS_fusion_kr_dict(x,  
                     target_waves, spectral_mean, B,
                     target_times, smooth, spatial_mod, 
-                    obs_operator, state_in_cov, cov_wt, ar_phi) , T );
+                    obs_operator, state_in_cov, cov_wt, tscov_pars, ar_phi) , T );
     
     # Reconstruct the full fused image and standard deviation image from the results
     # obtained from each individual window.
