@@ -1077,7 +1077,9 @@ function hyperSTARS_fusion_kr_dict(d,
             filtering_covs[:,:,t+1] = P_pred
             filtering_prec[:,t+1] = 1.0 ./ sqrt.(diag(P_pred))
         else
-            woodbury_filter_kr!(x_new, P_new, Ms, HS_helpers, ys, x_pred, P_pred)
+            # woodbury_filter_kr!(x_new, P_new, Ms, HS_helpers, ys, x_pred, P_pred)
+            x_new, P_new = woodbury_filter_kr(Ms, ys, x_pred, P_pred)
+
             filtering_means[:,t+1] = x_new
             filtering_covs[:,:,t+1] = P_new
             filtering_prec[:,t+1] = 1.0 ./ sqrt.(diag(P_new))
@@ -1264,7 +1266,7 @@ function scene_fusion_pmap(inst_data::AbstractVector{InstrumentData},
                       cov_wt::Real = 0.3,
                       tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
                       ar_phi::Real = 1.0,
-                      nb_coarse::Real = 2.0)
+                      window_radius::Real = 0.0)
 
     ### Define target extent and target + buffer extent
     # Extract geospatial parameters for windows and target grid.
@@ -1300,10 +1302,16 @@ function scene_fusion_pmap(inst_data::AbstractVector{InstrumentData},
         buffer_ext = window_bbox .+ window_buffer*[-1.01,1.01]*target_csize'
         all_exts = [Matrix(find_overlapping_ext(buffer_ext[1,:], buffer_ext[2,:], x.origin, x.cell_size)) for x in inst_geodata]
         res_flag = [x.fidelity for x in inst_geodata] 
-        for i in findall(res_flag .== 2)
-            exx = window_bbox .+ [-nb_coarse - 0.01,nb_coarse + 0.01]*inst_geodata[i].cell_size'
-            push!(all_exts, exx)
-        end
+        # for i in findall(res_flag .== 2)
+        #     exx = window_bbox .+ [-nb_coarse - 0.01,nb_coarse + 0.01]*inst_geodata[i].cell_size'
+        #     push!(all_exts, exx)
+        # end
+
+        ## replace nb_coarse with window radius (actually a square)
+        exx = window_bbox .+ [-window_radius - 0.01,window_radius + 0.01]
+        push!(all_exts, exx)
+        
+
         full_ext = merge_extents(all_exts, sign.(target_csize))
         target_ij = find_all_ij_ext(window_bbox[1,:], window_bbox[2,:], target_origin, target_csize, target_ndims; inclusive=false)
         ss_ij = find_all_ij_ext(buffer_ext[1,:], buffer_ext[2,:], target_origin, target_csize, target_ndims)
