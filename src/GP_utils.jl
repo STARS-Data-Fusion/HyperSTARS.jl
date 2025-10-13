@@ -335,11 +335,11 @@ function state_cov(Xtt::AbstractArray{T}, pars::AbstractVector{T}) where T<:Real
     # Set the length-scale (`phi`) adaptively.
     # It's the maximum of a small value and the median of all distances.
     # This prevents `phi` from becoming too small (leading to numerical issues or a very spiky kernel).
-    phi = maximum([0.00001,median(dd[:])])
+    # phi = maximum([0.00001,median(dd[:])])
     
     # Compute the Exponential kernel based on `pars[1]` (amplitude) and the adaptive `phi`.
     # Add a small nugget effect for numerical stability.
-    Qst = pars[1] .* exp.(-dd./phi) + UniformScaling(1e-10)
+    Qst = pars[1] .* exp.(-dd./pars[2]) + UniformScaling(1e-10)
     return Qst
 end
 

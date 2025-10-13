@@ -179,13 +179,17 @@ pmean = zeros((target_ndims...,size(B)[2]))
 pvar = ones((target_ndims...,size(B)[2])) 
 
 # Define spatial model parameters (`model_pars`) for each latent spectral component.
-# Each row of `model_pars` corresponds to one latent component.
-# Columns are: [amplitude/variance, spatial_range, nugget, smoothness_parameter].
+# First and second dimensions are dimensions of window_geodata
+# Third dimension corresponds to latent components.
+# Fourth dimension is: [amplitude/variance, spatial_range, nugget, smoothness_parameter].
 # These parameters define the spatial covariance structure (e.g., Matern 3/2).
-model_pars = hcat(10.0*ones(size(B)[2]),500*ones(size(B)[2]),1e-10*ones(size(B)[2]),1.5*ones(size(B)[2])); 
-# The first column of `model_pars` (amplitude/variance) is set to the principal variances (`vrs`) from PCA.
+model_pars = ones((nwindows...,size(B)[2],4)) .* reshape([0.1,500,1e-10,1.5], (1,1,1,4))
+
+# The third dimension of `model_pars` (amplitude/variance) is set to the principal variances (`vrs`) from PCA.
 # This aligns the spatial variance with the variance explained by each latent spectral component.
-model_pars[:,1] = vrs
+for (i,x) in enumerate(vrs)
+    model_pars[:,:,i,1] .= x
+end
 
 # --- 4. Run Data Fusion ---
 # Ensure LinearAlgebra and BLAS are loaded on all worker processes.
@@ -222,4 +226,4 @@ rmprocs(workers())
 k=1 # Select the first latent spectral component.
 # `fused_images[:,:,k,4]` selects all rows and columns, for the `k`-th latent component, at the 4th time step.
 # `heatmap` creates a 2D plot where colors represent values, useful for visualizing raster data.
-heatmap(fused_images[:,:,k,4],title="Fused Image (Latent Component $k$, Day 4)",size=(600,600))
+heatmap(fused_images[:,:,k,4],title="Fused Image, Day 4)",size=(600,600))

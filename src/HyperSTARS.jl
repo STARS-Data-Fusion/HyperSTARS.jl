@@ -909,6 +909,7 @@ function hyperSTARS_fusion_kr_dict(d,
                 obs_operator::Function = unif_weighted_obs_operator,
                 state_in_cov::Bool = true,
                 cov_wt::Real = 0.3,
+                tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
                 ar_phi = 1.0) 
 
     measurements = @views d[:measurements]
@@ -1032,9 +1033,10 @@ function hyperSTARS_fusion_kr_dict(d,
             Xtt ./= sum(Wt, dims=3)
 
             # Qst = Vector{Matrix{Float64}}(undef,p)
-            for (i,x) in enumerate(eachrow(model_pars))
+            for (i,x) in enumerate(tscov_pars)
                 ids = ((i-1)*nf+1):i*nf
-                @views Qf[ids,ids] .+= state_cov(Xtt[:,i,:]',x) .* (1.0 .- cov_wt)
+                x2 = [model_pars[i,1], x]
+                @views Qf[ids,ids] .+= state_cov(Xtt[:,i,:]',x2) .* (1.0 .- cov_wt)
                 # Qst[i] = state_cov(Xtt[:,i,:]',x)
             end
         
@@ -1075,7 +1077,9 @@ function hyperSTARS_fusion_kr_dict(d,
             filtering_covs[:,:,t+1] = P_pred
             filtering_prec[:,t+1] = 1.0 ./ sqrt.(diag(P_pred))
         else
-            woodbury_filter_kr!(x_new, P_new, Ms, HS_helpers, ys, x_pred, P_pred)
+            # woodbury_filter_kr!(x_new, P_new, Ms, HS_helpers, ys, x_pred, P_pred)
+            x_new, P_new = woodbury_filter_kr(Ms, ys, x_pred, P_pred)
+
             filtering_means[:,t+1] = x_new
             filtering_covs[:,:,t+1] = P_new
             filtering_prec[:,t+1] = 1.0 ./ sqrt.(diag(P_new))
@@ -1203,7 +1207,7 @@ function create_data_dicts( ii )
     d[:kp_ij] = tind
     d[:prior_mean] = prior_mean_sub
     d[:prior_var] = prior_var_sub
-    d[:model_pars] = model_pars
+    d[:model_pars] = @views model_pars[k,l,:,:]
 
     return d
 end
@@ -1259,9 +1263,10 @@ function scene_fusion_pmap(inst_data::AbstractVector{InstrumentData},
                       spatial_mod::Function = mat32_corD,                                           
                       obs_operator::Function = unif_weighted_obs_operator,
                       state_in_cov::Bool = true,
-                      cov_wt::Real = 0.7,
+                      cov_wt::Real = 0.3,
+                      tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
                       ar_phi::Real = 1.0,
-                      nb_coarse::Real = 2.0)
+                      window_radius::Real = 0.0)
 
     ### Define target extent and target + buffer extent
     # Extract geospatial parameters for windows and target grid.
@@ -1297,10 +1302,16 @@ function scene_fusion_pmap(inst_data::AbstractVector{InstrumentData},
         buffer_ext = window_bbox .+ window_buffer*[-1.01,1.01]*target_csize'
         all_exts = [Matrix(find_overlapping_ext(buffer_ext[1,:], buffer_ext[2,:], x.origin, x.cell_size)) for x in inst_geodata]
         res_flag = [x.fidelity for x in inst_geodata] 
-        for i in findall(res_flag .== 2)
-            exx = window_bbox .+ [-nb_coarse - 0.01,nb_coarse + 0.01]*inst_geodata[i].cell_size'
-            push!(all_exts, exx)
-        end
+        # for i in findall(res_flag .== 2)
+        #     exx = window_bbox .+ [-nb_coarse - 0.01,nb_coarse + 0.01]*inst_geodata[i].cell_size'
+        #     push!(all_exts, exx)
+        # end
+
+        ## replace nb_coarse with window radius (actually a square)
+        exx = window_bbox .+ [-window_radius - 0.01,window_radius + 0.01]
+        push!(all_exts, exx)
+        
+
         full_ext = merge_extents(all_exts, sign.(target_csize))
         target_ij = find_all_ij_ext(window_bbox[1,:], window_bbox[2,:], target_origin, target_csize, target_ndims; inclusive=false)
         ss_ij = find_all_ij_ext(buffer_ext[1,:], buffer_ext[2,:], target_origin, target_csize, target_ndims)
@@ -1322,7 +1333,7 @@ function scene_fusion_pmap(inst_data::AbstractVector{InstrumentData},
         d[:kp_ij] = tind
         d[:prior_mean] = prior_mean_sub
         d[:prior_var] = prior_var_sub
-        d[:model_pars] = model_pars
+        d[:model_pars] = @views model_pars[k,l,:,:]
         push!(T,d)
     end
 
@@ -1331,7 +1342,7 @@ function scene_fusion_pmap(inst_data::AbstractVector{InstrumentData},
     result = @showprogress pmap(x -> hyperSTARS_fusion_kr_dict(x,  
                     target_waves, spectral_mean, B,
                     target_times, smooth, spatial_mod, 
-                    obs_operator, state_in_cov, cov_wt, ar_phi) , T );
+                    obs_operator, state_in_cov, cov_wt, tscov_pars, ar_phi) , T );
     
     # Reconstruct the full fused image and standard deviation image from the results
     # obtained from each individual window.
@@ -1346,5 +1357,6 @@ function scene_fusion_pmap(inst_data::AbstractVector{InstrumentData},
     return fused_image, fused_sd_image
 
 end
+
 
 end # end of module
