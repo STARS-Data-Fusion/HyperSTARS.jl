@@ -8,20 +8,23 @@
 
 ## Executive Summary
 
-This proposal outlines a plan to consolidate duplicate code between **HyperSTARS.jl** and **STARSDataFusion.jl** by making STARSDataFusion.jl the shared foundation package and converting HyperSTARS.jl into a lightweight wrapper that re-exports spectral fusion capabilities.
+This proposal outlines a plan to consolidate duplicate code between **HyperSTARS.jl** and **STARSDataFusion.jl** by:
+1. Moving shared utility files to STARSDataFusion.jl as the foundation package
+2. Making HyperSTARS.jl depend on STARSDataFusion.jl for shared utilities
+3. **Keeping all hyperspectral/spectral-specific algorithms in HyperSTARS.jl**
 
 ### Key Benefits
 
-- **Eliminate ~500 lines of duplicate code** across 3 files
-- **Reduce maintenance burden** - single codebase for shared utilities
-- **Enable cross-pollination** - combine spectral fusion with bias modeling
+- **Eliminate ~500 lines of duplicate code** across 3 utility files
+- **Reduce maintenance burden** - single codebase for shared utilities (GP, spatial, resampling)
+- **Clear separation of concerns** - STARSDataFusion for utilities + spatial fusion, HyperSTARS for spectral fusion
 - **Maintain 100% backward compatibility** - all existing production code continues to work unchanged
 - **Improve testing** - consolidated test suite for shared functionality
 
 ### Impact Summary
 
-- **HyperSTARS.jl users:** No code changes required; wrapper provides transparent access
-- **STARSDataFusion.jl users:** No changes; gains optional spectral fusion module
+- **HyperSTARS.jl users:** No code changes required; imports STARSDataFusion for utilities automatically
+- **STARSDataFusion.jl users:** No changes; gains more complete utility functions from HyperSTARS
 - **Production systems:** Zero breaking changes; validated against existing workflows
 
 ---
