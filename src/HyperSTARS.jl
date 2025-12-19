@@ -1358,5 +1358,116 @@ function scene_fusion_pmap(inst_data::AbstractVector{InstrumentData},
 
 end
 
+function scene_inds_fusion_pmap(inst_data::AbstractVector{InstrumentData},
+                      inst_geodata::AbstractVector{InstrumentGeoData},
+                      window_geodata::InstrumentGeoData,
+                      target_geodata::InstrumentGeoData,
+                      inds::AbstractArray{<:Real},
+                      spectral_mean::AbstractVector{<:Real},
+                      prior_mean::AbstractArray{<:Real},
+                      prior_var::AbstractArray{<:Real},
+                      B::AbstractArray{<:Real},
+                      model_pars::AbstractArray{<:Real};
+                      nsamp::Integer = 100,
+                      window_buffer::Integer = 2,
+                      target_times::Union{AbstractVector{<:Real}, UnitRange{<:Real}} = [1], 
+                      smooth::Bool = false,           
+                      spatial_mod::Function = mat32_corD,                                           
+                      obs_operator::Function = unif_weighted_obs_operator,
+                      state_in_cov::Bool = true,
+                      cov_wt::Real = 0.3,
+                      tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
+                      ar_phi::Real = 1.0,
+                      window_radius::Real = 0.0)
+
+    ### Define target extent and target + buffer extent
+    # Extract geospatial parameters for windows and target grid.
+    window_csize = @views window_geodata.cell_size
+    target_csize = @views target_geodata.cell_size
+    window_origin = @views window_geodata.origin
+    nwindows = @views window_geodata.ndims # Number of windows in x and y dimensions
+    target_origin = @views target_geodata.origin
+    target_waves = @views target_geodata.wavelengths
+    target_ndims = @views target_geodata.ndims # Dimensions of the overall target grid
+
+    ni = length(inst_geodata) # Total number of instruments
+    nsteps = size(target_times)[1] # Number of target time steps for output
+    
+    # Pre-allocate arrays for the final fused image and its standard deviation across the entire scene.
+    # Dimensions: (target_x, target_y, latent_spectral_components, time_steps)
+    fused_image = zeros(target_ndims[1], target_ndims[2], size(B)[2], nsteps);
+    fused_sd_image = zeros(target_ndims[1], target_ndims[2], size(B)[2], nsteps);
+    
+    # Generate all (k,l) indices for each window in the scene.
+    # inds = hcat(repeat(1:nwindows[1], inner=nwindows[2]), repeat(1:nwindows[2], outer=nwindows[1]))
+    
+    nr = size(inds,1) # Total number of spatial windows
+
+    # Prepare input dictionaries for each spatial window.
+    # This loop is essentially the content of the `create_data_dicts` function,
+    # inlined here to explicitly show how `T` is constructed before `pmap`.
+    T = []
+    for ii in 1:nr
+        k,l = inds[ii,:]
+
+        window_bbox = bbox_from_centroid(window_origin .+ [k-1, l-1].*window_csize, window_csize)
+        buffer_ext = window_bbox .+ window_buffer*[-1.01,1.01]*target_csize'
+        all_exts = [Matrix(find_overlapping_ext(buffer_ext[1,:], buffer_ext[2,:], x.origin, x.cell_size)) for x in inst_geodata]
+        res_flag = [x.fidelity for x in inst_geodata] 
+        # for i in findall(res_flag .== 2)
+        #     exx = window_bbox .+ [-nb_coarse - 0.01,nb_coarse + 0.01]*inst_geodata[i].cell_size'
+        #     push!(all_exts, exx)
+        # end
+
+        ## replace nb_coarse with window radius (actually a square)
+        exx = window_bbox .+ [-window_radius - 0.01,window_radius + 0.01]
+        push!(all_exts, exx)
+        
+
+        full_ext = merge_extents(all_exts, sign.(target_csize))
+        target_ij = find_all_ij_ext(window_bbox[1,:], window_bbox[2,:], target_origin, target_csize, target_ndims; inclusive=false)
+        ss_ij = find_all_ij_ext(buffer_ext[1,:], buffer_ext[2,:], target_origin, target_csize, target_ndims)
+        if any(res_flag .== 2)
+            ss_ij = unique(vcat(ss_ij, sobol_bau_ij(full_ext[1,:], full_ext[2,:], target_origin, target_csize, target_ndims; nsamp=nsamp)),dims=1)
+        end
+        ss_xy = get_sij_from_ij(ss_ij, target_origin, target_csize)
+        measurements, ss_ij = organize_data(full_ext, inst_geodata, inst_data, target_geodata, ss_xy, ss_ij, res_flag)
+        bau_ij = unique(vcat(target_ij, ss_ij),dims=1)
+        bau_coords = get_sij_from_ij(bau_ij, target_origin, target_csize)
+        bau_ci = CartesianIndex.(bau_ij[:,1],bau_ij[:,2])
+        prior_mean_sub = @views prior_mean[bau_ci,:][:]
+        prior_var_sub = @views prior_var[bau_ci,:][:]
+        tind = CartesianIndex.(target_ij[:,1], target_ij[:,2])
+
+        d = Dict()
+        d[:measurements] = measurements
+        d[:target_coords] = bau_coords
+        d[:kp_ij] = tind
+        d[:prior_mean] = prior_mean_sub
+        d[:prior_var] = prior_var_sub
+        d[:model_pars] = @views model_pars[k,l,:,:]
+        push!(T,d)
+    end
+
+    # Perform parallel fusion using `pmap`. Each element of `T` (a dictionary for one window)
+    # is processed by `hyperSTARS_fusion_kr_dict`. `pmap` distributes these tasks.
+    result = @showprogress pmap(x -> hyperSTARS_fusion_kr_dict(x,  
+                    target_waves, spectral_mean, B,
+                    target_times, smooth, spatial_mod, 
+                    obs_operator, state_in_cov, cov_wt, tscov_pars, ar_phi) , T );
+    
+    # Reconstruct the full fused image and standard deviation image from the results
+    # obtained from each individual window.
+    for i in 1:nr
+        # `result[i][1]` contains `kp_ij` (Cartesian indices of the target BAUs for window `i`).
+        # `result[i][2]` contains `fused_image` for window `i`.
+        # `result[i][3]` contains `fused_sd_image` for window `i`.
+        @views fused_image[result[i][1],:,:] = result[i][2]
+        @views fused_sd_image[result[i][1],:,:] = result[i][3]
+    end
+    
+    return fused_image, fused_sd_image
+
+end
 
 end # end of module
