@@ -17,6 +17,7 @@ module HyperSTARS
 
 export organize_data
 export scene_fusion_pmap
+export scene_inds_fusion_pmap
 export create_data_dicts
 export hyperSTARS_fusion_kr_dict
 export woodbury_filter_kr
