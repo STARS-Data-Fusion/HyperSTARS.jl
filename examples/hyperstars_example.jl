@@ -8,6 +8,7 @@ using JLD2 # For loading data stored in JLD2 format (Julia's binary data format)
 using Distributed # Crucial for parallel processing using Julia's `pmap`
 using MultivariateStats # For performing Principal Component Analysis (PCA)
 using LinearAlgebra # Provides `Diagonal`, `I` (identity matrix), and other linear algebra utilities
+using HyperSTARS
 
 # Add worker processes for parallel execution.
 # This line starts 8 additional Julia processes that can run code concurrently.
@@ -17,7 +18,7 @@ addprocs(8)
 # The `@everywhere` macro executes the subsequent expression on all available worker processes.
 # This ensures that the `HyperSTARS` module and its functions are loaded into memory on all workers,
 # which is necessary for `pmap` to execute `HyperSTARS` functions in parallel.
-@everywhere using HyperSTARS
+# @everywhere using HyperSTARS
 
 # --- 2. Data Loading ---
 # This section loads synthetic hyperspectral data from a JLD2 file.
@@ -196,6 +197,8 @@ end
 # BLAS.set_num_threads(1) can help prevent over-threading if `pmap` is already using many cores.
 @everywhere using LinearAlgebra
 @everywhere BLAS.set_num_threads(1)
+# @everywhere using ProgressMeter
+@everywhere using HyperSTARS
 
 # Execute the `scene_fusion_pmap` function, which orchestrates the parallel fusion across the entire scene.
 # `@time` measures the execution time of this function.
@@ -215,7 +218,7 @@ end
             spatial_mod = HyperSTARS.mat32_corD, # Spatial covariance function (Matern 3/2 with precomputed distances)
             obs_operator = HyperSTARS.unif_weighted_obs_operator_centroid, # Observation operator (uniform weighting based on centroid overlap)
             state_in_cov=false, # Flag: `false` means process noise covariance is static; `true` would make it adaptive
-            nb_coarse=1.0); # Parameter related to handling coarse resolution instruments within windows
+            window_radius=1000.0); # Parameter defining spatial size of neighborhood to sample neighbors
 
 ## Remove worker processes after parallel computation is complete.
 # This frees up system resources.
