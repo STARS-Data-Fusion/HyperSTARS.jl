@@ -1,6 +1,6 @@
 # HyperSTARS.jl
 
-Hyperspectral Spatial Timeseries for Automated high-Resolution multi-Sensor data fusion (STARS) Julia Package
+Hyperspectral Spatial Timeseries for Automated high-Resolution multi-Sensor data fusion (HyperSTARS) Julia Package
 
 This Julia package, `HyperSTARS.jl`, is designed for advanced hyperspectral data fusion. It combines data from multiple instruments with varying spatial, spectral, and temporal resolutions into a single, high-resolution, fused product. The core methodology leverages state-space models and advanced statistical filtering and smoothing techniques (specifically, Kalman filtering and smoothing variants), making it robust for integrating diverse remote sensing datasets.
 
