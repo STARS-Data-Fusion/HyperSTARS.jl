@@ -1059,7 +1059,7 @@ function hyperSTARS_fusion_kr_dict(d,
             Hs2 = Hss[x][ym,:]
 
             push!(Ms, HyperSTARS.HSModel(Hws[x], Hs2, Diagonal(measurements[x].uq[:,kt][:]), 1.0*I(size(Hs2,1)), Qf, F))
-            push!(ys,yss[ym,:] .- Hms[x]' .- measurements[x].bias[:,kt]);
+            push!(ys,yss[ym,:] .- Hms[x]' .- measurements[x].bias[:,kt]');
         end
 
         # Predictive mean and covariance here
