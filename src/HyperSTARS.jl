@@ -164,8 +164,8 @@ A structure to hold measurements and metadata for a single instrument.
 """
 struct InstrumentData
     data::AbstractArray # n x w x T arrays of measurements
-    bias::Union{Any,AbstractArray} # W, n x W, or n x W x T array of error biases (currently only implemented for W)
-    uq::Union{Any,AbstractArray} # W, n x W, or n x W x T array of error variances (currently only implemented for W)
+    bias::Union{Any,AbstractArray} # W x T array of error biases 
+    uq::Union{Any,AbstractArray} # W x T array of error variances
     spatial_resolution::AbstractVector # [rx,ry] vector of spatial resolution 
     dates::AbstractVector # vector of dates
     coords::AbstractArray # n x 2 array of spatial coordinates
@@ -1053,12 +1053,13 @@ function hyperSTARS_fusion_kr_dict(d,
 
         ys = Vector{Array{Float64}}()
         for x in findall(data_kp[:,t])
-            yss = @views measurements[x].data[:,:,measurements[x].dates .== t2]
+            kt = measurements[x].dates .== t2
+            yss = @views measurements[x].data[:,:,kt]
             ym = .!vec(any(isnan, yss; dims=2))
             Hs2 = Hss[x][ym,:]
 
-            push!(Ms, HyperSTARS.HSModel(Hws[x], Hs2, Diagonal(measurements[x].uq[:]), 1.0*I(size(Hs2,1)), Qf, F))
-            push!(ys,yss[ym,:] .- Hms[x]');
+            push!(Ms, HyperSTARS.HSModel(Hws[x], Hs2, Diagonal(measurements[x].uq[:,kt][:]), 1.0*I(size(Hs2,1)), Qf, F))
+            push!(ys,yss[ym,:] .- Hms[x]' .- measurements[x].bias[:,kt]);
         end
 
         # Predictive mean and covariance here

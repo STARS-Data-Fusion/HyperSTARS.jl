@@ -18,7 +18,12 @@ addprocs(8)
 # The `@everywhere` macro executes the subsequent expression on all available worker processes.
 # This ensures that the `HyperSTARS` module and its functions are loaded into memory on all workers,
 # which is necessary for `pmap` to execute `HyperSTARS` functions in parallel.
-# @everywhere using HyperSTARS
+
+# Ensure LinearAlgebra and BLAS are loaded on all worker processes.
+# BLAS.set_num_threads(1) can help prevent over-threading if `pmap` is already using many cores.
+@everywhere using LinearAlgebra
+@everywhere BLAS.set_num_threads(1)
+@everywhere using HyperSTARS
 
 # --- 2. Data Loading ---
 # This section loads synthetic hyperspectral data from a JLD2 file.
@@ -161,10 +166,10 @@ target30m_geodata = InstrumentGeoData(hls_origin, hls_csize, target_ndims, 0, [1
 # These structs contain the actual measurement arrays, along with error biases (`bias`),
 # uncertainty quantification (`uq` - here, 1e-5 variance), spatial resolution,
 # observation times, a placeholder for coordinates (`[1,1]`), wavelengths, and SRF info.
-hls_data = InstrumentData(hls_array, zeros(size(hls_array)[3]), 1e-5*ones(size(hls_array)[3]), abs.(hls_csize), hls_times, [1,1], hls_waves, hls_srf)
-emit_data = InstrumentData(emit_array, zeros(size(emit_array)[3]), 1e-5*ones(size(emit_array)[3]), abs.(emit_csize), emit_times, [1,1], emit_waves, 1.0) # 1.0 implies simple SRF for EMIT
-pace_data = InstrumentData(pace_array, zeros(size(pace_array)[3]), 1e-5*ones(size(pace_array)[3]), abs.(pace_csize), pace_times, [1,1], pace_waves, fwhm_pace)
-pace1km_data = InstrumentData(pace1km_array, zeros(size(pace1km_array)[3]), 1e-5*ones(size(pace1km_array)[3]), abs.(pace1km_csize), pace_times, [1,1], pace_waves, fwhm_pace)
+hls_data = InstrumentData(hls_array, zeros(size(hls_array)[3:4]), 1e-5*ones(size(hls_array)[3:4]), abs.(hls_csize), hls_times, [1,1], hls_waves, hls_srf)
+emit_data = InstrumentData(emit_array, zeros(size(emit_array)[3:4]), 1e-5*ones(size(emit_array)[3:4]), abs.(emit_csize), emit_times, [1,1], emit_waves, 1.0) # 1.0 implies simple SRF for EMIT
+pace_data = InstrumentData(pace_array, zeros(size(pace_array)[3:4]), 1e-5*ones(size(pace_array)[3:4]), abs.(pace_csize), pace_times, [1,1], pace_waves, fwhm_pace)
+pace1km_data = InstrumentData(pace1km_array, zeros(size(pace1km_array)[3:4]), 1e-5*ones(size(pace1km_array)[3:4]), abs.(pace1km_csize), pace_times, [1,1], pace_waves, fwhm_pace)
 
 # Create a list of `InstrumentData` for the fusion.
 data30m_list = [emit_data, hls_data, pace1km_data];
@@ -193,13 +198,6 @@ for (i,x) in enumerate(vrs)
 end
 
 # --- 4. Run Data Fusion ---
-# Ensure LinearAlgebra and BLAS are loaded on all worker processes.
-# BLAS.set_num_threads(1) can help prevent over-threading if `pmap` is already using many cores.
-@everywhere using LinearAlgebra
-@everywhere BLAS.set_num_threads(1)
-# @everywhere using ProgressMeter
-@everywhere using HyperSTARS
-
 # Execute the `scene_fusion_pmap` function, which orchestrates the parallel fusion across the entire scene.
 # `@time` measures the execution time of this function.
 @time fused_images, fused_sd_images = HyperSTARS.scene_fusion_pmap(data30m_list, # List of instrument data (measurements)
