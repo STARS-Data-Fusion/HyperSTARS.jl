@@ -100,6 +100,42 @@ Computes the variance of an array `x`, excluding `NaN` (Not a Number) values.
 """
 nanvar(x) = var(filter(!isnan, x)) # Added nanvar as it was exported but not defined
 
+"""
+    diag_cov_XB(Σ, B, nf, p, r)
+
+Computes the diag((B kron I)*Sigma*(B kron I)') 
+"""
+function diag_cov_XB(Σ, B, nf, p, r)
+    result = zeros(nf, r)
+    
+    # Precompute all relevant covariance slices
+    # For each i, extract the nf-strided slice of Σ we need
+    @inbounds for j in 1:r
+        Bj = @view B[:, j]
+        for i in 1:nf
+            acc = zero(eltype(result))
+            
+            # Diagonal terms (k == l)
+            for k in 1:p
+                idx = (k-1)*nf + i
+                acc += Bj[k]^2 * Σ[idx, idx]
+            end
+            
+            # Off-diagonal terms (k < l, exploit symmetry)
+            for k in 1:p-1
+                row_idx = (k-1)*nf + i
+                @simd for l in k+1:p
+                    col_idx = (l-1)*nf + i
+                    acc += 2 * Bj[k] * Bj[l] * Σ[row_idx, col_idx]
+                end
+            end
+            
+            result[i, j] = acc
+        end
+    end
+    return result
+end
+
 
 # --- State-Space Model Structures ---
 
@@ -1001,8 +1037,10 @@ function hyperSTARS_fusion_kr_dict(d,
     # push!(filtering_means, prior_mean[:])
     # push!(filtering_covs, Diagonal(prior_var[:]))
 
-    fused_image = zeros(nbau,p,size(target_times,1))
-    fused_sd_image = zeros(nbau,p,size(target_times,1))
+    ## update to back projection
+    nw = size(B,1) # number of target wavelengths
+    fused_image = zeros(nbau,nw,size(target_times,1))
+    fused_sd_image = zeros(nbau,nw,size(target_times,1))
 
     kp_times = findall(times .∈ Ref(target_times))
 
@@ -1088,17 +1126,22 @@ function hyperSTARS_fusion_kr_dict(d,
         end
     end
 
+    ## update with back projection
     if smooth
         st = minimum(kp_times)
         smoothed_means, smoothed_covs = smooth_series(F, predicted_means[:,st:end], predicted_covs[:,:,st:end], filtering_means[:,st:end], filtering_covs[:,:,st:end])
         for (ti,t2) in enumerate(kp_times .- st .+ 1)
-            fused_image[:,:,ti] = @views reshape(smoothed_means[:,t2],(nf,p))[1:nbau,:] 
-            fused_sd_image[:,:,ti] = @views reshape(sqrt.(diag(smoothed_covs[:,:,t2])),(nf,p))[1:nbau,:]
+            fused_image[:,:,ti] = @views reshape(smoothed_means[:,t2],(nf,p))[1:nbau,:] * B' .+ spectral_mean' ## back project to spectral domain
+            # fused_sd_image[:,:,ti] = @views reshape(sqrt.(diag(smoothed_covs[:,:,t2])),(nf,p))[1:nbau,:]
+            Σ = @views smoothed_covs[:,:,t2]
+            fused_sd_image[:,:,ti] = sqrt.(diag_cov_XB(Σ, B', nf, p, nw)[1:nbau,:])
         end
     else
         for (ti,t2) in enumerate(kp_times)
-            fused_image[:,:,ti] = @views reshape(filtering_means[:,t2+1],(nf,p))[1:nbau,:] 
-            fused_sd_image[:,:,ti] = @views reshape(sqrt.(diag(filtering_covs[:,:,t2+1])),(nf,p))[1:nbau,:]
+            fused_image[:,:,ti] = @views reshape(filtering_means[:,t2+1],(nf,p))[1:nbau,:] * B' .+ spectral_mean' ## back project to spectral domain
+            # fused_sd_image[:,:,ti] = @views reshape(sqrt.(diag(filtering_covs[:,:,t2+1])),(nf,p))[1:nbau,:]
+            Σ = @views filtering_covs[:,:,t2+1]
+            fused_sd_image[:,:,ti] = sqrt.(diag_cov_XB(Σ, B', nf, p, nw)[1:nbau,:])
         end
     end  
     return kp_ij, fused_image, fused_sd_image   
@@ -1285,8 +1328,8 @@ function scene_fusion_pmap(inst_data::AbstractVector{InstrumentData},
     
     # Pre-allocate arrays for the final fused image and its standard deviation across the entire scene.
     # Dimensions: (target_x, target_y, latent_spectral_components, time_steps)
-    fused_image = zeros(target_ndims[1], target_ndims[2], size(B)[2], nsteps);
-    fused_sd_image = zeros(target_ndims[1], target_ndims[2], size(B)[2], nsteps);
+    fused_image = zeros(target_ndims[1], target_ndims[2], size(target_waves)[1], nsteps);
+    fused_sd_image = zeros(target_ndims[1], target_ndims[2], size(target_waves)[1], nsteps);
     
     # Generate all (k,l) indices for each window in the scene.
     inds = hcat(repeat(1:nwindows[1], inner=nwindows[2]), repeat(1:nwindows[2], outer=nwindows[1]))
@@ -1397,8 +1440,8 @@ function scene_inds_fusion_pmap(inst_data::AbstractVector{InstrumentData},
     
     # Pre-allocate arrays for the final fused image and its standard deviation across the entire scene.
     # Dimensions: (target_x, target_y, latent_spectral_components, time_steps)
-    fused_image = zeros(target_ndims[1], target_ndims[2], size(B)[2], nsteps);
-    fused_sd_image = zeros(target_ndims[1], target_ndims[2], size(B)[2], nsteps);
+    fused_image = zeros(target_ndims[1], target_ndims[2], size(target_waves,1), nsteps);
+    fused_sd_image = zeros(target_ndims[1], target_ndims[2], size(target_waves,1), nsteps);
     
     # Generate all (k,l) indices for each window in the scene.
     # inds = hcat(repeat(1:nwindows[1], inner=nwindows[2]), repeat(1:nwindows[2], outer=nwindows[1]))
