@@ -19,18 +19,20 @@ git clone https://github.com/STARS-Data-Fusion/HyperSTARS.jl.git
 cd HyperSTARS.jl
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
 
-# 2. Install Python data downloader
-cd ../
-git clone https://github.com/STARS-Data-Fusion/EMIT-L2A-RFL.git
-cd EMIT-L2A-RFL
+# 2. Create Python environment and install EMIT data downloader
 mamba create -n EMITL2ARFL -c conda-forge python=3.10 hdf5 h5py netcdf4
 mamba activate EMITL2ARFL
-pip install -e .
+pip install EMITL2ARFL
 
 # 3. Set up NASA Earthdata credentials in ~/.netrc
+cat > ~/.netrc << EOF
+machine urs.earthdata.nasa.gov
+login YOUR_USERNAME
+password YOUR_PASSWORD
+EOF
+chmod 600 ~/.netrc
 
 # 4. Download data and run examples
-cd ../HyperSTARS.jl
 julia --project=. examples/hyperstars_example.jl  # with synthetic data
 julia --project=. examples/emit_hls_demo.jl       # with real data
 ```
@@ -145,23 +147,18 @@ chmod 600 ~/.netrc
 
 ### Step 3: Install EMIT Data Downloader (Python)
 
-The companion Python package downloads and preprocesses EMIT data:
+The companion Python package downloads and preprocesses EMIT data from PyPI:
 
 ```bash
-# Clone the EMIT-L2A-RFL package
-cd ..
-git clone https://github.com/STARS-Data-Fusion/EMIT-L2A-RFL.git
-cd EMIT-L2A-RFL
-
 # Create conda environment with compatible HDF5 libraries
 mamba create -n EMITL2ARFL -c conda-forge python=3.10 hdf5 h5py netcdf4
 mamba activate EMITL2ARFL
 
-# Install the package
-pip install -e .
+# Install the package from PyPI
+pip install EMITL2ARFL
 
 # Verify installation
-python -c "import EMITL2ARFL; print('✅ EMIT-L2A-RFL installed')"
+python -c "import EMITL2ARFL; print('✅ EMITL2ARFL installed successfully')"
 ```
 
 ### Step 4: Download Example Data
@@ -362,7 +359,7 @@ mamba install -c conda-forge h5py netcdf4 --force-reinstall
 ```bash
 # Solution: Ensure you're in the correct conda environment
 mamba activate EMITL2ARFL
-pip install -e .
+pip install --upgrade EMITL2ARFL
 ```
 
 #### 💾 Memory Issues
