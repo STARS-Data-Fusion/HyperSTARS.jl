@@ -9,30 +9,42 @@ Hyperspectral Spatial Timeseries for Automated high-Resolution multi-Sensor data
 This Julia package, `HyperSTARS.jl`, is designed for advanced hyperspectral data fusion. It combines data from multiple instruments with varying spatial, spectral, and temporal resolutions into a single, high-resolution, fused product. The core methodology leverages state-space models and advanced statistical filtering and smoothing techniques (specifically, Kalman filtering and smoothing variants), making it robust for integrating diverse remote sensing datasets.
 
 
-## Quick Start (1 Minute)
+## Setup Instructions
 
 **📊 Expected Workflow:** Install → Configure → Download Data → Run Examples
 
+### 1. Install Julia Package
+
 ```bash
-# 1. Install Julia package
 git clone https://github.com/STARS-Data-Fusion/HyperSTARS.jl.git
 cd HyperSTARS.jl
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
+```
 
-# 2. Create Python environment and install EMIT data downloader
+### 2. Create Python Environment and Install EMIT Data Downloader
+
+```bash
 mamba create -n EMITL2ARFL -c conda-forge python=3.10 hdf5 h5py netcdf4
 mamba activate EMITL2ARFL
 pip install EMITL2ARFL
+```
 
-# 3. Set up NASA Earthdata credentials in ~/.netrc
+### 3. Set Up NASA Earthdata Credentials
+
+First, visit [NASA Earthdata](https://urs.earthdata.nasa.gov/) to create/access your account, then:
+
+```bash
 cat > ~/.netrc << EOF
 machine urs.earthdata.nasa.gov
 login YOUR_USERNAME
 password YOUR_PASSWORD
 EOF
 chmod 600 ~/.netrc
+```
 
-# 4. Download data and run examples
+### 4. Download Data and Run Examples
+
+```bash
 julia --project=. examples/hyperstars_example.jl  # with synthetic data
 julia --project=. examples/emit_hls_demo.jl       # with real data
 ```
