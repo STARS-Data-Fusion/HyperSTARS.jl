@@ -9,28 +9,42 @@ Hyperspectral Spatial Timeseries for Automated high-Resolution multi-Sensor data
 This Julia package, `HyperSTARS.jl`, is designed for advanced hyperspectral data fusion. It combines data from multiple instruments with varying spatial, spectral, and temporal resolutions into a single, high-resolution, fused product. The core methodology leverages state-space models and advanced statistical filtering and smoothing techniques (specifically, Kalman filtering and smoothing variants), making it robust for integrating diverse remote sensing datasets.
 
 
-## Quick Start (1 Minute)
+## Setup Instructions
 
 **📊 Expected Workflow:** Install → Configure → Download Data → Run Examples
 
+### 1. Install Julia Package
+
 ```bash
-# 1. Install Julia package
 git clone https://github.com/STARS-Data-Fusion/HyperSTARS.jl.git
 cd HyperSTARS.jl
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
+```
 
-# 2. Install Python data downloader
-cd ../
-git clone https://github.com/STARS-Data-Fusion/EMIT-L2A-RFL.git
-cd EMIT-L2A-RFL
+### 2. Create Python Environment and Install EMIT Data Downloader
+
+```bash
 mamba create -n EMITL2ARFL -c conda-forge python=3.10 hdf5 h5py netcdf4
 mamba activate EMITL2ARFL
-pip install -e .
+pip install EMITL2ARFL
+```
 
-# 3. Set up NASA Earthdata credentials in ~/.netrc
+### 3. Set Up NASA Earthdata Credentials
 
-# 4. Download data and run examples
-cd ../HyperSTARS.jl
+First, visit [NASA Earthdata](https://urs.earthdata.nasa.gov/) to create/access your account, then:
+
+```bash
+cat > ~/.netrc << EOF
+machine urs.earthdata.nasa.gov
+login YOUR_USERNAME
+password YOUR_PASSWORD
+EOF
+chmod 600 ~/.netrc
+```
+
+### 4. Download Data and Run Examples
+
+```bash
 julia --project=. examples/hyperstars_example.jl  # with synthetic data
 julia --project=. examples/emit_hls_demo.jl       # with real data
 ```
@@ -145,23 +159,18 @@ chmod 600 ~/.netrc
 
 ### Step 3: Install EMIT Data Downloader (Python)
 
-The companion Python package downloads and preprocesses EMIT data:
+The companion Python package downloads and preprocesses EMIT data from PyPI:
 
 ```bash
-# Clone the EMIT-L2A-RFL package
-cd ..
-git clone https://github.com/STARS-Data-Fusion/EMIT-L2A-RFL.git
-cd EMIT-L2A-RFL
-
 # Create conda environment with compatible HDF5 libraries
 mamba create -n EMITL2ARFL -c conda-forge python=3.10 hdf5 h5py netcdf4
 mamba activate EMITL2ARFL
 
-# Install the package
-pip install -e .
+# Install the package from PyPI
+pip install EMITL2ARFL
 
 # Verify installation
-python -c "import EMITL2ARFL; print('✅ EMIT-L2A-RFL installed')"
+python -c "import EMITL2ARFL; print('✅ EMITL2ARFL installed successfully')"
 ```
 
 ### Step 4: Download Example Data
@@ -362,7 +371,7 @@ mamba install -c conda-forge h5py netcdf4 --force-reinstall
 ```bash
 # Solution: Ensure you're in the correct conda environment
 mamba activate EMITL2ARFL
-pip install -e .
+pip install --upgrade EMITL2ARFL
 ```
 
 #### 💾 Memory Issues
