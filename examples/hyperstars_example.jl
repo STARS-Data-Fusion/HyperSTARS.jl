@@ -84,9 +84,6 @@ begin
     close(f) # Close the JLD2 file after loading all data.
 end
 
-# Adjust an HLS time point. This might be for aligning time series or specific analysis.
-hls_times[1] = 1
-
 #### Add 1km PACE data (continued)
 # Convert the original `pace_array` into a `Raster` object for easy aggregation.
 # `dims` specify the physical dimensions (X, Y, Z for wavelengths, Band for time) for the Raster.
@@ -224,7 +221,11 @@ rmprocs(workers())
 
 # --- 5. Visualization ---
 # Visualize one of the fused images.
-k=1 # Select the first latent spectral component.
-# `fused_images[:,:,k,4]` selects all rows and columns, for the `k`-th latent component, at the 4th time step.
+k=60 # Select the 60th spectral band
+# `fused_images[:,:,k,4]` selects all rows and columns, for the `k`-th wavelength, at the 4th time step.
 # `heatmap` creates a 2D plot where colors represent values, useful for visualizing raster data.
 heatmap(fused_images[:,:,k,4],title="Fused Image, Day 4)",size=(600,600))
+
+## plot fused spectra for pixel (20,40) at time 2
+scatter(emit_waves, fused_images[20,40,:,2])
+plot!(emit_waves, fused_images[20,40,:,2], ribbon=1.96.*fused_sd_images[20,40,:,2])
