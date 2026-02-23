@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        julia-version: ['1.9', '1.10', '1']  # 1.9, 1.10, and latest stable
+        julia-version: ['1.11', '1']  # 1.11 (minimum required) and latest stable
       fail-fast: false
 
     steps:
