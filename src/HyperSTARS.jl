@@ -322,6 +322,17 @@ function woodbury_filter_kr(Ms::AbstractVector{<:HSModel},
     F .= F * HViH; # F now holds F_prev * HViH = P_pred * (I - HtRHIi) * HViH
     P_new .= P_pred # Initialize P_new with P_pred
     mul!(P_new, F, P_pred, -1.0, 1.0) # P_new = P_pred - F * P_pred = (I - F_prev*HViH) * P_pred
+    
+    # Explicitly symmetrize to avoid numerical precision issues
+    P_new .= (P_new + P_new') / 2
+    
+    # Add small regularization to maintain numerical stability and positive-definiteness
+    max_diag = maximum(abs, diag(P_new))
+    n_dim = size(P_new, 1)
+    reg_amount = max_diag * 1e-3 + 1e-8
+    for i in 1:n_dim
+        P_new[i, i] += reg_amount
+    end
 
     return x_new, P_new
 end
@@ -405,6 +416,17 @@ function woodbury_filter_kr!(x_new::AbstractVector{Float64},
     # F .= F * HViH;
     P_new .= P_pred
     mul!(P_new, F * HViH, P_pred, -1.0, 1.0)
+    
+    # Explicitly symmetrize to avoid numerical precision issues
+    P_new .= (P_new + P_new') / 2
+    
+    # Add small regularization to maintain numerical stability and positive-definiteness
+    max_diag = maximum(abs, diag(P_new))
+    n_dim = size(P_new, 1)
+    reg_amount = max_diag * 1e-3 + 1e-8
+    for i in 1:n_dim
+        P_new[i, i] += reg_amount
+    end
 end
 
 
@@ -474,6 +496,18 @@ function smooth_series(F::Union{AbstractSparseMatrix{Float64},AbstractMatrix{Flo
             D = BLAS.symm('R', 'U', CC, C) # D = C * CC
             CC .= filtering_covs[:,:,i]
             P_smooth = BLAS.gemm!('N', 'T', 1., D, C, 1., CC)
+        end
+        
+        # Explicitly symmetrize to avoid numerical precision issues
+        P_smooth = (P_smooth + P_smooth') / 2
+        
+        # Add small regularization to maintain numerical stability and positive-definiteness
+        # This is standard practice in Kalman filtering implementations
+        n_dim = size(P_smooth, 1)
+        max_diag = maximum(abs, diag(P_smooth))
+        reg_amount = max_diag * 1e-3 + 1e-8
+        for j in 1:n_dim
+            P_smooth[j, j] += reg_amount
         end
 
         smoothed_means[:,i-1] = x_smooth
