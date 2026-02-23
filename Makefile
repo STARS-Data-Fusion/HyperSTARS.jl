@@ -2,18 +2,8 @@
 
 # Default target
 help:
-	@echo "HyperSTARS.jl Makefile"
-	@echo "======================"
-	@echo ""
-	@echo "Available targets:"
-	@echo "  make install    - Install/instantiate package dependencies"
-	@echo "  make test       - Run the full test suite"
-	@echo "  make test-fast  - Run tests directly (faster, shows output)"
-	@echo "  make update     - Update package dependencies"
-	@echo "  make clean      - Remove build artifacts and caches"
-	@echo "  make check      - Check package status and environment"
-	@echo "  make examples   - Run example scripts"
-	@echo "  make help       - Show this help message"
+	@awk 'BEGIN{p=0} /^## Setup Instructions/{p=1} p && /^## / && !/^## Setup Instructions/{exit} p{print}' README.md \
+	| sed -E '/^```/d; s/`//g; s/^[[:space:]]*#+[[:space:]]*//; s/\*\*([^*]+)\*\*/\1/g; s/\*([^*]+)\*/\1/g; s/\[([^]]+)\]\([^)]+\)/\1/g'
 
 # Install package dependencies
 install:

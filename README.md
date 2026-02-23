@@ -18,8 +18,10 @@ This Julia package, `HyperSTARS.jl`, is designed for advanced hyperspectral data
 ```bash
 git clone https://github.com/STARS-Data-Fusion/HyperSTARS.jl.git
 cd HyperSTARS.jl
-julia --project=. -e 'using Pkg; Pkg.instantiate()'
+make install
 ```
+
+> Note: `make install` runs `julia --project=. -e 'using Pkg; Pkg.instantiate()'`.
 
 ### 2. Create Python Environment and Install EMIT Data Downloader
 
