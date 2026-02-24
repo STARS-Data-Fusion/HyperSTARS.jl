@@ -26,12 +26,16 @@ function get_hls_data(dir, bands, date_range)
     raster_list = []
     time_dates = nothing
     band_arrays_list = []
+    ref_raster = nothing
     
     for band in bands 
         band_files = glob("*$(band)*.tif", joinpath(dir,band)) ## find all tif files in band subdirectory
         band_dates = [Date(match(r"\d{8}", f).match, "yyyymmdd") for f in band_files] ## extract dates from tif filenames
         kp_dates = date_range[1] .<= band_dates .<= date_range[2] ## find all available dates within target date range
-        band_rasters = [Raster(x) for x in band_files[kp_dates]] ## read geotiffs for all dates found in date range
+        band_rasters = [Raster(x, lazy=true) for x in band_files[kp_dates]] ## read geotiffs for all dates found in date range, using lazy loading
+        if ref_raster === nothing && !isempty(band_rasters)
+            ref_raster = band_rasters[1]
+        end
         if time_dates === nothing
             time_dates = band_dates[kp_dates]
         end
@@ -60,7 +64,7 @@ function get_hls_data(dir, bands, date_range)
     end
     
     hls_array = permutedims(hls_array, (1,2,4,3)) ## reorder to y,x,time,band
-    return hls_array, time_dates
+    return hls_array, time_dates, ref_raster
 end
 
 #### loading EMIT data from EMIT directory
@@ -69,12 +73,15 @@ function get_emit(dir_path, emit_dir, date_range)
     wavelengths = emit_metadata[emit_metadata[:,2].==1,1]
     fwhm = emit_metadata[emit_metadata[:,2].==1,3]
     good_wavelengths = emit_metadata[:,2]
+    good_wavelength_inds = findall(good_wavelengths .== 1)
 
     emit_files = glob("*.tif", emit_dir)
     emit_dates = [Date(match(r"\d{8}", f).match, "yyyymmdd") for f in emit_files] ## extract dates from tif filenames
     kp_dates = date_range[1] .<= emit_dates .<= date_range[2] ## find all available dates within target date range
 
-    emit_rasters = [Raster(x)[:,:,good_wavelengths .== 1] for x in emit_files[kp_dates]] # read emit rasters for dates in range, only keep good wavelengths
+    # Use lazy=true to avoid loading entire large files into memory
+    emit_rasters = [Raster(x, lazy=true)[:,:,good_wavelength_inds] for x in emit_files[kp_dates]] # read emit rasters for dates in range, only keep good wavelengths
+    ref_raster = isempty(emit_rasters) ? nothing : emit_rasters[1]
 
     # Convert rasters to arrays
     emit_arrays = [Array(r) for r in emit_rasters]
@@ -98,7 +105,7 @@ function get_emit(dir_path, emit_dir, date_range)
     end
 
     emit_array[.!isfinite.(emit_array) .| (emit_array .== -9999)] .= NaN ## replace missings and -9999 with nans
-    return emit_array, emit_dates[kp_dates], fwhm, wavelengths
+    return emit_array, emit_dates[kp_dates], fwhm, wavelengths, ref_raster
 end
 
 ###### spectral response functions for landsat (L30) and sentinel (S30)
@@ -148,25 +155,25 @@ function get_data(dir_path, date_range)
     hls_s30_bands = ["coastal_aerosol", "blue", "green", "red", "rededge1","rededge2","rededge3", "NIR_broad", "NIR", "SWIR1", "SWIR2"]
 
     ## load and combine all L30 and S30 data into x,y,band,time raster
-    hls_l30_raster, hls_l30_dates = get_hls_data(hls_l30_dir, hls_l30_bands, date_range)
-    hls_s30_raster, hls_s30_dates = get_hls_data(hls_s30_dir, hls_s30_bands, date_range)
+    hls_l30_raster, hls_l30_dates, hls_l30_ref = get_hls_data(hls_l30_dir, hls_l30_bands, date_range)
+    hls_s30_raster, hls_s30_dates, hls_s30_ref = get_hls_data(hls_s30_dir, hls_s30_bands, date_range)
 
     S30_srf, L30_srf, hls_l30_waves, hls_s30_waves = get_srf(dir_path)
 
-    emit_raster, emit_dates, fwhm_emit, emit_waves = get_emit(dir_path, emit_dir, date_range)
+    emit_raster, emit_dates, fwhm_emit, emit_waves, emit_ref = get_emit(dir_path, emit_dir, date_range)
 
     ###### Fusion setup
-    emit_origin = get_centroid_origin_raster(emit_raster)
-    hls_s30_origin = get_centroid_origin_raster(hls_s30_raster)
-    hls_l30_origin = get_centroid_origin_raster(hls_l30_raster)
+    emit_origin = get_centroid_origin_raster(emit_ref)
+    hls_s30_origin = get_centroid_origin_raster(hls_s30_ref)
+    hls_l30_origin = get_centroid_origin_raster(hls_l30_ref)
 
     emit_ndims = collect(size(emit_raster)[1:2])
     hls_s30_ndims = collect(size(hls_s30_raster)[1:2])
     hls_l30_ndims = collect(size(hls_l30_raster)[1:2])
 
-    emit_csize = collect(cell_size(emit_raster))
-    hls_s30_csize = collect(cell_size(hls_s30_raster))
-    hls_l30_csize = collect(cell_size(hls_l30_raster))
+    emit_csize = collect(cell_size(emit_ref))
+    hls_s30_csize = collect(cell_size(hls_s30_ref))
+    hls_l30_csize = collect(cell_size(hls_l30_ref))
 
     ## sequence of dates from start/end observed
     all_dates = minimum([emit_dates..., hls_l30_dates..., hls_s30_dates...]):maximum([emit_dates..., hls_l30_dates..., hls_s30_dates...])
@@ -177,9 +184,9 @@ function get_data(dir_path, date_range)
     hls_s30_times = findall(all_dates .∈ Ref(hls_s30_dates))
 
     ## rasters to data arrays, nx x ny x nw x T
-    hls_l30_array = disallowmissing(hls_l30_raster.data);
-    hls_s30_array = disallowmissing(hls_s30_raster.data);
-    emit_array = disallowmissing(emit_raster.data);
+    hls_l30_array = disallowmissing(hls_l30_raster);
+    hls_s30_array = disallowmissing(hls_s30_raster);
+    emit_array = disallowmissing(emit_raster);
 
     ### create geospatial structs for each instrument
     # 4th element is spatial "fidelity": 0 for highest (target) spatial res, 1 for high but not target, 2 for coarse res (like PACE)
