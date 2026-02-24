@@ -24,18 +24,43 @@ addprocs(Sys.CPU_THREADS - 1) ## workers (using Distributed package), Check how 
 ######### Wrapper functions to reduce memory and compiling time
 function get_hls_data(dir, bands, date_range)
     raster_list = []
+    time_dates = nothing
+    band_arrays_list = []
+    
     for band in bands 
         band_files = glob("*$(band)*.tif", joinpath(dir,band)) ## find all tif files in band subdirectory
         band_dates = [Date(match(r"\d{8}", f).match, "yyyymmdd") for f in band_files] ## extract dates from tif filenames
         kp_dates = date_range[1] .<= band_dates .<= date_range[2] ## find all available dates within target date range
         band_rasters = [Raster(x) for x in band_files[kp_dates]] ## read geotiffs for all dates found in date range
-        push!(raster_list, cat(band_rasters...; dims=Ti(band_dates[kp_dates]))) ## concatenate rasters by time 
+        if time_dates === nothing
+            time_dates = band_dates[kp_dates]
+        end
+        # Convert rasters to arrays
+        band_arrays = [Array(r) for r in band_rasters]
+        push!(band_arrays_list, band_arrays)
     end ## loop over all bands
 
-    hls_rast = cat(raster_list...,dims=Band(bands)) ## concatenate list of band rasters by band
-    hls_rast = permutedims(hls_rast, (1,2,4,3)) ## reorder to y,x,band,time
-    replace!(hls_rast, missing => NaN) ## replace missings with nans
-    return hls_rast, hls_rast.dims[4].val[:]
+    # Get dimensions from first raster
+    ny, nx = size(band_arrays_list[1][1])
+    ntime = length(time_dates)
+    nbands = length(findall(x -> !isempty(x), band_arrays_list))  # Only count non-empty bands
+    
+    # Create output array
+    hls_array = zeros(Float32, ny, nx, nbands, ntime)
+    
+    # Fill array by concatenating times, then bands
+    for (bi, band_arrays) in enumerate(band_arrays_list)
+        for (ti, arr) in enumerate(band_arrays)
+            # Replace missing values with NaN first, then assign
+            for y in 1:ny, x in 1:nx
+                val = arr[y, x]
+                hls_array[y, x, bi, ti] = ismissing(val) ? NaN32 : Float32(val)
+            end
+        end
+    end
+    
+    hls_array = permutedims(hls_array, (1,2,4,3)) ## reorder to y,x,time,band
+    return hls_array, time_dates
 end
 
 #### loading EMIT data from EMIT directory
@@ -51,17 +76,47 @@ function get_emit(dir_path, emit_dir, date_range)
 
     emit_rasters = [Raster(x)[:,:,good_wavelengths .== 1] for x in emit_files[kp_dates]] # read emit rasters for dates in range, only keep good wavelengths
 
-    emit_raster = cat(emit_rasters...; dims = Ti(emit_dates[kp_dates])) # concatenate rasters to y,x,wavelength,time
+    # Convert rasters to arrays
+    emit_arrays = [Array(r) for r in emit_rasters]
+    
+    if !isempty(emit_arrays)
+        ny, nx, nwaves = size(emit_arrays[1])
+        ntime = length(emit_arrays)
+        
+        # Create output array
+        emit_array = zeros(Float32, ny, nx, nwaves, ntime)
+        
+        # Fill array
+        for (ti, arr) in enumerate(emit_arrays)
+            for y in 1:ny, x in 1:nx, w in 1:nwaves
+                val = arr[y, x, w]
+                emit_array[y, x, w, ti] = ismissing(val) ? NaN32 : Float32(val)
+            end
+        end
+    else
+        emit_array = zeros(Float32, 0, 0, 0, 0)
+    end
 
-    replace!(emit_raster, -9999 => NaN) ## replace missings with nans
-    replace!(emit_raster, missing => NaN) ## replace missings with nans
-    return emit_raster, emit_dates[kp_dates], fwhm, wavelengths
+    emit_array[.!isfinite.(emit_array) .| (emit_array .== -9999)] .= NaN ## replace missings and -9999 with nans
+    return emit_array, emit_dates[kp_dates], fwhm, wavelengths
 end
 
 ###### spectral response functions for landsat (L30) and sentinel (S30)
-function get_srf()
-    HLS_L30_srf, _ = readdlm(joinpath(dir_path,"HLS_L30_srf.csv"), ',', header=true)
-    HLS_S30_srf, _ = readdlm(joinpath(dir_path,"HLS_S30_srf.csv"), ',', header=true)
+function get_srf(dir_path)
+    l30_srf_path = joinpath(dir_path, "HLS_L30_srf.csv")
+    s30_srf_path = joinpath(dir_path, "HLS_S30_srf.csv")
+    
+    if !isfile(l30_srf_path)
+        error("HLS_L30_srf.csv not found at $(l30_srf_path). " *
+              "Please ensure spectral response function files are in your data directory.")
+    end
+    if !isfile(s30_srf_path)
+        error("HLS_S30_srf.csv not found at $(s30_srf_path). " *
+              "Please ensure spectral response function files are in your data directory.")
+    end
+    
+    HLS_L30_srf, _ = readdlm(l30_srf_path, ',', header=true)
+    HLS_S30_srf, _ = readdlm(s30_srf_path, ',', header=true)
 
     ## HLS uses the landsat srf for matching bands (all but red edge)
     HLS_S30_srf[HLS_S30_srf[:,1] .∈ Ref(HLS_L30_srf[:,1]),[2,3,4,5,10,13,14]] .= HLS_L30_srf[:,[2,3,4,5,6,8,9]]
@@ -96,7 +151,7 @@ function get_data(dir_path, date_range)
     hls_l30_raster, hls_l30_dates = get_hls_data(hls_l30_dir, hls_l30_bands, date_range)
     hls_s30_raster, hls_s30_dates = get_hls_data(hls_s30_dir, hls_s30_bands, date_range)
 
-    S30_srf, L30_srf, hls_l30_waves, hls_s30_waves = get_srf()
+    S30_srf, L30_srf, hls_l30_waves, hls_s30_waves = get_srf(dir_path)
 
     emit_raster, emit_dates, fwhm_emit, emit_waves = get_emit(dir_path, emit_dir, date_range)
 
@@ -179,7 +234,7 @@ end
 
 
 #### Target fusion date range
-date_range = [Date("2024-07-01"), Date("2024-07-31")]
+date_range = [Date("2022-08-01"), Date("2022-08-31")]
 
 #### parent directory
 # dir_path = "/Users/maggiej/Documents/Hyperspectral_DataFusion/Data/KingsCanyon/"
