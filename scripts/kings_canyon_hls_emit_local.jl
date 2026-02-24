@@ -75,7 +75,7 @@ function get_hls_data(dir, bands, date_range)
         end
     end
     
-    hls_array = permutedims(hls_array, (1,2,4,3)) ## reorder to y,x,time,band
+    # Keep y,x,band,time order to match expected data layout (nx x ny x nw x T)
     hls_array[ismissing.(hls_array)] .= NaN ## replace missings with nans
     return hls_array, time_dates, ref_raster
 end

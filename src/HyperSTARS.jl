@@ -689,7 +689,11 @@ function organize_data(full_ext::AbstractArray{<:Real},
 
             # Expand `ss_ij` to include all Basic Area Units (BAUs) in the target grid that
             # overlap with the current instrument's observations.
-            ss_ij = @views unique(vcat(ss_ij,find_all_bau_ij_multi(ins_xy, inst_geodata[i].cell_size, target_geodata.origin, target_geodata.cell_size, target_geodata.ndims)),dims=1)
+            new_bau_ij = find_all_bau_ij_multi(ins_xy, inst_geodata[i].cell_size, target_geodata.origin, target_geodata.cell_size, target_geodata.ndims)
+            if size(new_bau_ij, 2) == 0
+                new_bau_ij = Matrix{Int64}(undef, 0, 2)
+            end
+            ss_ij = @views unique(vcat(ss_ij, new_bau_ij), dims=1)
             # Update `ss_xy` based on the expanded `ss_ij`.
             ss_xy = get_sij_from_ij(ss_ij, target_geodata.origin, target_geodata.cell_size)
             
