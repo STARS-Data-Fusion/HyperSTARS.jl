@@ -99,10 +99,18 @@ s30_header = ["Wavelength", "Coastal", "Blue", "Green", "Red", "RedEdge1", "RedE
               "RedEdge3", "NIR_Broad", "NIR", "WaterVapor", "Placeholder", "SWIR1", "SWIR2"]
 
 # ============================================================================
-# Write CSV files to script directory
+# Write CSV files
 # ============================================================================
-script_dir = dirname(@__FILE__)
-data_dir = expanduser("~/data")
+# Auto-detect environment and use appropriate path
+if isdir("/gpfs/scratch/refl-datafusion-trtd/")
+    # HPC environment
+    data_dir = "/gpfs/scratch/refl-datafusion-trtd"
+    println("Using HPC data directory: $data_dir")
+else
+    # Local environment
+    data_dir = expanduser("~/data")
+    println("Using local data directory: $data_dir")
+end
 
 # Create data directory if it doesn't exist
 mkpath(data_dir)

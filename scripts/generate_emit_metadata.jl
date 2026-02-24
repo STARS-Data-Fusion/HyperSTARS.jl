@@ -47,7 +47,17 @@ emit_metadata[:, 3] .= 7.3
 header = ["Wavelength_nm", "GoodWavelength", "FWHM_nm"]
 
 # Write to file
-data_dir = expanduser("~/data")
+# Auto-detect environment and use appropriate path
+if isdir("/gpfs/scratch/refl-datafusion-trtd/")
+    # HPC environment
+    data_dir = "/gpfs/scratch/refl-datafusion-trtd"
+    println("Using HPC data directory: $data_dir")
+else
+    # Local environment
+    data_dir = expanduser("~/data")
+    println("Using local data directory: $data_dir")
+end
+
 mkpath(data_dir)
 metadata_path = joinpath(data_dir, "EMIT_metadata.csv")
 

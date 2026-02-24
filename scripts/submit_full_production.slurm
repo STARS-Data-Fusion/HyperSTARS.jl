@@ -45,6 +45,22 @@ cd $SLURM_SUBMIT_DIR
 
 echo ""
 echo "Working directory: $(pwd)"
+echo ""
+
+# Generate required CSV files if they don't exist
+DATA_DIR="/gpfs/scratch/refl-datafusion-trtd"
+
+echo "Checking for required data files..."
+if [ ! -f "$DATA_DIR/EMIT_metadata.csv" ] || [ ! -f "$DATA_DIR/HLS_L30_srf.csv" ] || [ ! -f "$DATA_DIR/HLS_S30_srf.csv" ]; then
+    echo "Generating missing CSV files..."
+    julia --project=. scripts/generate_srf_files.jl
+    julia --project=. scripts/generate_emit_metadata.jl
+    echo "CSV files generated successfully"
+else
+    echo "All required CSV files found"
+fi
+
+echo ""
 echo "Running kings_canyon_hls_emit_local.jl..."
 echo "WARNING: This is the full 31-day production run"
 echo ""
