@@ -30,10 +30,18 @@ function get_hls_data(dir, bands, date_range)
     
     for band in bands 
         band_files = glob("*$(band)*.tif", joinpath(dir,band)) ## find all tif files in band subdirectory
+        if isempty(band_files)
+            @warn "No files found for band $band in $dir"
+            continue
+        end
         band_dates = [Date(match(r"\d{8}", f).match, "yyyymmdd") for f in band_files] ## extract dates from tif filenames
         kp_dates = date_range[1] .<= band_dates .<= date_range[2] ## find all available dates within target date range
         band_rasters = [Raster(x, lazy=true) for x in band_files[kp_dates]] ## read geotiffs for all dates found in date range, using lazy loading
-        if ref_raster === nothing && !isempty(band_rasters)
+        if isempty(band_rasters)
+            @warn "No rasters found for band $band in specified date range"
+            continue
+        end
+        if ref_raster === nothing
             ref_raster = band_rasters[1]
         end
         if time_dates === nothing
@@ -44,6 +52,10 @@ function get_hls_data(dir, bands, date_range)
         push!(band_arrays_list, band_arrays)
     end ## loop over all bands
 
+    if isempty(band_arrays_list)
+        error("No valid raster data found for any bands")
+    end
+    
     # Get dimensions from first raster
     ny, nx = size(band_arrays_list[1][1])
     ntime = length(time_dates)
@@ -64,6 +76,7 @@ function get_hls_data(dir, bands, date_range)
     end
     
     # Keep y,x,band,time order to match expected data layout (nx x ny x nw x T)
+    hls_array[ismissing.(hls_array)] .= NaN ## replace missings with nans
     return hls_array, time_dates, ref_raster
 end
 
@@ -241,11 +254,14 @@ end
 
 
 #### Target fusion date range
+# MINIMAL EXAMPLE: Use 3 days for quick testing (uncomment for MWE)
+# date_range = [Date("2022-08-01"), Date("2022-08-03")]
+# FULL EXAMPLE: Use full month
 date_range = [Date("2022-08-01"), Date("2022-08-31")]
 
 #### parent directory
 # dir_path = "/Users/maggiej/Documents/Hyperspectral_DataFusion/Data/KingsCanyon/"
-dir_path = "/gpfs/scratch/refl-datafusion-trtd/"
+dir_path = expanduser("~/data/")
 
 data30m_list, inst30m_geodata, all_dates = get_data(dir_path, date_range)
 
