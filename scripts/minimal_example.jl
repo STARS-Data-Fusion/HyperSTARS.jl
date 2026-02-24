@@ -228,7 +228,7 @@ println("=" ^ 70)
 date_range = [Date("2022-08-13"), Date("2022-08-17")]
 println("Date range: $(date_range[1]) to $(date_range[2])")
 
-dir_path = expanduser("~/data/")
+dir_path = "/gpfs/scratch/refl-datafusion-trtd/"
 
 # Measure memory
 mem_start = Sys.maxrss() / 1024^2
