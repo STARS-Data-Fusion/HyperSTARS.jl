@@ -102,8 +102,14 @@ s30_header = ["Wavelength", "Coastal", "Blue", "Green", "Red", "RedEdge1", "RedE
 # Write CSV files
 # ============================================================================
 # Auto-detect environment and use appropriate path
-if isdir("/gpfs/scratch/refl-datafusion-trtd/")
-    # HPC environment
+if haskey(ENV, "HYPERSTARS_METADATA_DIR")
+    data_dir = ENV["HYPERSTARS_METADATA_DIR"]
+    println("Using data directory from HYPERSTARS_METADATA_DIR: $data_dir")
+elseif haskey(ENV, "HYPERSTARS_DATA_DIR")
+    data_dir = ENV["HYPERSTARS_DATA_DIR"]
+    println("Using data directory from HYPERSTARS_DATA_DIR: $data_dir")
+elseif isdir("/gpfs/scratch/refl-datafusion-trtd/")
+    # HPC environment (fallback)
     data_dir = "/gpfs/scratch/refl-datafusion-trtd"
     println("Using HPC data directory: $data_dir")
 else

@@ -86,8 +86,8 @@ function get_hls_data(dir, bands, date_range)
     return hls_array, time_dates, ref_raster
 end
 
-function get_emit(dir_path, emit_dir, date_range)
-    emit_metadata, _ = readdlm(joinpath(dir_path,"EMIT_metadata.csv"), ',', header=true)
+function get_emit(dir_path, emit_dir, date_range; metadata_dir=dir_path)
+    emit_metadata, _ = readdlm(joinpath(metadata_dir, "EMIT_metadata.csv"), ',', header=true)
     wavelengths = emit_metadata[emit_metadata[:,2].==1,1]
     fwhm = emit_metadata[emit_metadata[:,2].==1,3]
     good_wavelengths = emit_metadata[:,2]
@@ -124,9 +124,9 @@ function get_emit(dir_path, emit_dir, date_range)
     return emit_array, emit_dates[kp_dates], fwhm, wavelengths, ref_raster
 end
 
-function get_srf(dir_path)
-    l30_srf_path = joinpath(dir_path, "HLS_L30_srf.csv")
-    s30_srf_path = joinpath(dir_path, "HLS_S30_srf.csv")
+function get_srf(dir_path; metadata_dir=dir_path)
+    l30_srf_path = joinpath(metadata_dir, "HLS_L30_srf.csv")
+    s30_srf_path = joinpath(metadata_dir, "HLS_S30_srf.csv")
     
     if !isfile(l30_srf_path)
         error("HLS_L30_srf.csv not found at $(l30_srf_path)")
@@ -165,9 +165,9 @@ function get_data(dir_path, date_range)
     hls_l30_raster, hls_l30_dates, hls_l30_ref = get_hls_data(hls_l30_dir, hls_l30_bands, date_range)
     hls_s30_raster, hls_s30_dates, hls_s30_ref = get_hls_data(hls_s30_dir, hls_s30_bands, date_range)
 
-    S30_srf, L30_srf, hls_l30_waves, hls_s30_waves = get_srf(dir_path)
+    S30_srf, L30_srf, hls_l30_waves, hls_s30_waves = get_srf(dir_path; metadata_dir=metadata_dir)
 
-    emit_raster, emit_dates, fwhm_emit, emit_waves, emit_ref = get_emit(dir_path, emit_dir, date_range)
+    emit_raster, emit_dates, fwhm_emit, emit_waves, emit_ref = get_emit(dir_path, emit_dir, date_range; metadata_dir=metadata_dir)
 
     emit_origin = get_centroid_origin_raster(emit_ref)
     hls_s30_origin = get_centroid_origin_raster(hls_s30_ref)
@@ -228,7 +228,10 @@ println("=" ^ 70)
 date_range = [Date("2022-08-13"), Date("2022-08-17")]
 println("Date range: $(date_range[1]) to $(date_range[2])")
 
-dir_path = "/gpfs/scratch/refl-datafusion-trtd/"
+dir_path = get(ENV, "HYPERSTARS_DATA_DIR", "/gpfs/scratch/refl-datafusion-trtd/")
+metadata_dir = get(ENV, "HYPERSTARS_METADATA_DIR", dir_path)
+println("Data path: $dir_path")
+println("Metadata path: $metadata_dir")
 
 # Measure memory
 mem_start = Sys.maxrss() / 1024^2
