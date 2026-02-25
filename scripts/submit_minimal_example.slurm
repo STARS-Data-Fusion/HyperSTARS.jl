@@ -49,9 +49,13 @@ echo ""
 
 # Generate required CSV files if they don't exist
 DATA_DIR="/gpfs/scratch/refl-datafusion-trtd"
+META_DIR="/gpfs/scratch/refl-datafusion-trtd/$USER/hyperstars_metadata"
+export HYPERSTARS_DATA_DIR="$DATA_DIR"
+export HYPERSTARS_METADATA_DIR="$META_DIR"
+mkdir -p "$META_DIR"
 
 echo "Checking for required data files..."
-if [ ! -f "$DATA_DIR/EMIT_metadata.csv" ] || [ ! -f "$DATA_DIR/HLS_L30_srf.csv" ] || [ ! -f "$DATA_DIR/HLS_S30_srf.csv" ]; then
+if [ ! -f "$META_DIR/EMIT_metadata.csv" ] || [ ! -f "$META_DIR/HLS_L30_srf.csv" ] || [ ! -f "$META_DIR/HLS_S30_srf.csv" ]; then
     echo "Generating missing CSV files..."
     julia --project=. scripts/generate_srf_files.jl
     julia --project=. scripts/generate_emit_metadata.jl
