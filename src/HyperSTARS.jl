@@ -18,6 +18,7 @@ module HyperSTARS
 export organize_data
 export scene_fusion_pmap
 export scene_inds_fusion_pmap
+export scene_inds_1D_fusion_pmap
 export create_data_dicts
 export hyperSTARS_fusion_kr_dict
 export woodbury_filter_kr
@@ -465,6 +466,158 @@ function woodbury_filter_kr!(x_new::AbstractVector{Float64},
     end
 end
 
+is_scalar_identity(M) = size(M) == (1,1) && M[1,1] == 1.0
+
+"""
+    kalman_filter_kr(Ms, x_pred, P_pred)
+
+Implementation of standard filter update (inverse in observation space)
+"""
+function kalman_filter_kr(Ms::AbstractVector{<:HyperSTARS.HSModel}, 
+        y::AbstractVector{<:AbstractArray{Float64}}, 
+        x_pred::AbstractVector{Float64}, 
+        P_pred::AbstractArray{Float64}) 
+
+    ###############
+    # H = vcat([kron(Ms[i].Hw, Ms[i].Hs) for i in eachindex(Ms)]...)
+    if is_scalar_identity(Ms[1].Hw) 
+        Ht = vcat([Ms[i].Hs for i in eachindex(Ms)]...)
+        R = Matrix(BlockDiagonal([Ms[i].Vw[1] .* Ms[i].Vs for i in eachindex(Ms)]))
+    else 
+        Ht = vcat([kron(Ms[i].Hw, Ms[i].Hs) for i in eachindex(Ms)]...)
+        R = Matrix(BlockDiagonal([kron(Ms[i].Vw, Ms[i].Vs) for i in eachindex(Ms)]))
+    end
+    ys = vcat([x[:] for x in y]...)
+
+    N = size(x_pred,1)
+    x_new = ones(N) # Filtered state mean
+    P_new = zeros(N,N) # Filtered state covariance
+
+    res_pred = ys - Ht * x_pred # innovation
+
+    HPpT = P_pred * Ht'
+
+    S = Ht * HPpT + R # innovation covariance
+
+    # Kalman gain; K = P_pred * H' * inv(S)
+    begin
+        LAPACK.potrf!('U', S)
+        LAPACK.potri!('U', S)
+        K = BLAS.symm('R', 'U', S, HPpT)
+    end
+
+    # x_new = x_pred + K * res_pred
+    x_new .= x_pred
+    mul!(x_new, K, res_pred, 1.0, 1.0)
+
+
+    # P_new = P_pred - K * (Ht * P_pred) # filtering distribution covariance
+    P_new .= P_pred
+    mul!(P_new, K, HPpT', -1.0, 1.0)
+
+    ################################
+    # Explicitly symmetrize to avoid numerical precision issues
+    # P_new .= (P_new + P_new') ./ 2
+
+    return x_new, P_new
+end
+
+"""
+    kalman_filter_kr!(x_new, P_new, Ms, x_pred, P_pred)
+
+In-place implementation of standard filter update (inverse in observation space), modifies x_new, P_new in-place.
+"""
+function kalman_filter_kr!(x_new::AbstractVector{Float64}, 
+        P_new::AbstractArray{Float64}, 
+        Ms::AbstractVector{<:HyperSTARS.HSModel}, 
+        y::AbstractVector{<:AbstractArray{Float64}}, 
+        x_pred::AbstractVector{Float64}, 
+        P_pred::AbstractArray{Float64}) 
+
+    ###############
+    if is_scalar_identity(Ms[i].Hw) 
+        Ht = vcat([Ms[i].Hs for i in eachindex(Ms)]...)
+        R = BlockDiagonal([Ms[i].Vw .* Ms[i].Vs for i in eachindex(Ms)])
+    else 
+        Ht = vcat([kron(Ms[i].Hw, Ms[i].Hs) for i in eachindex(Ms)]...)
+        R = BlockDiagonal([kron(Ms[i].Vw, Ms[i].Vs) for i in eachindex(Ms)])
+    end
+    ys = vcat([x[:] for x in y]...)
+
+    res_pred = ys - Ht * x_pred # innovation
+
+    HPpT = P_pred * Ht'
+
+    S = Ht * HPpT + R # innovation covariance
+
+    # Kalman gain; K = P_pred * H' * inv(S)
+    begin
+        LAPACK.potrf!('U', S)
+        LAPACK.potri!('U', S)
+        K = BLAS.symm('R', 'U', S, HPpT)
+    end
+
+    # x_new = x_pred + K * res_pred
+    x_new .= x_pred
+    mul!(x_new, K, res_pred, 1.0, 1.0)
+
+
+    # P_new = P_pred - K * (Ht * P_pred) # filtering distribution covariance
+    P_new .= P_pred
+    mul!(P_new, K, HPpT', -1.0, 1.0)
+
+    ################################
+    # Explicitly symmetrize to avoid numerical precision issues
+    # P_new .= (P_new + P_new') / 2
+end
+
+
+"""
+    kalman_1D_filter_kr(Ms, x_pred, P_pred)
+
+Implementation of standard filter update (inverse in observation space), assuming a univariate QoI
+"""
+function kalman_1D_filter_kr(Ht::AbstractArray{Float64}, 
+        ys::AbstractVector{Float64},
+        vs::AbstractVector{Float64},
+        x_pred::AbstractVector{Float64}, 
+        P_pred::AbstractArray{Float64}) 
+
+    ###############
+    R = Diagonal(vs)
+
+    N = size(x_pred,1)
+    x_new = ones(N) # Filtered state mean
+    P_new = zeros(N,N) # Filtered state covariance
+
+    res_pred = ys - Ht * x_pred # innovation
+
+    HPpT = P_pred * Ht'
+
+    S = Ht * HPpT + R # innovation covariance
+
+    # Kalman gain; K = P_pred * H' * inv(S)
+    begin
+        LAPACK.potrf!('U', S)
+        LAPACK.potri!('U', S)
+        K = BLAS.symm('R', 'U', S, HPpT)
+    end
+
+    # x_new = x_pred + K * res_pred
+    x_new .= x_pred
+    mul!(x_new, K, res_pred, 1.0, 1.0)
+
+
+    # P_new = P_pred - K * (Ht * P_pred) # filtering distribution covariance
+    P_new .= P_pred
+    mul!(P_new, K, HPpT', -1.0, 1.0)
+
+    ################################
+    # Explicitly symmetrize to avoid numerical precision issues
+    # P_new .= (P_new + P_new') ./ 2
+
+    return x_new, P_new
+end
 
 """
     smooth_series(F, predicted_means, predicted_covs, filtering_means, filtering_covs)
@@ -1138,6 +1291,9 @@ function hyperSTARS_fusion_kr_dict(d,
             push!(ys,yss[ym,:] .- Hms[x]' .- measurements[x].bias[:,kt]');
         end
 
+        Nobs = sum(size(x.Hs,1)*size(x.Hw,1) for x in Ms)
+        Np = size(Qf,1)
+
         # Predictive mean and covariance here
         # x_pred = F * filtering_means[:,t] # filtering_means[1], covs[1] is prior mean
         # P_pred = F * filtering_covs[:,:,t] * F' + Qf
@@ -1150,13 +1306,19 @@ function hyperSTARS_fusion_kr_dict(d,
         predicted_covs[:,:,t] = P_pred
 
         # Filtering is done here
-        if length(ys) == 0
+        if Nobs == 0
             filtering_means[:,t+1] = x_pred
             filtering_covs[:,:,t+1] = P_pred
             filtering_prec[:,t+1] = 1.0 ./ sqrt.(diag(P_pred))
         else
-            # woodbury_filter_kr!(x_new, P_new, Ms, HS_helpers, ys, x_pred, P_pred)
-            x_new, P_new = woodbury_filter_kr(Ms, ys, x_pred, P_pred)
+            if Nobs > Np ## scale by a factor here?
+                # woodbury_filter_kr!(x_new, P_new, Ms, HS_helpers, ys, x_pred, P_pred)
+                # println("Woodbury Form")
+                x_new, P_new = woodbury_filter_kr(Ms, ys, x_pred, P_pred)
+            else 
+                # println("Standard Form")
+                x_new, P_new = kalman_filter_kr(Ms, ys, x_pred, P_pred)
+            end
 
             filtering_means[:,t+1] = x_new
             filtering_covs[:,:,t+1] = P_new
@@ -1180,6 +1342,181 @@ function hyperSTARS_fusion_kr_dict(d,
             # fused_sd_image[:,:,ti] = @views reshape(sqrt.(diag(filtering_covs[:,:,t2+1])),(nf,p))[1:nbau,:]
             Σ = @views filtering_covs[:,:,t2+1]
             fused_sd_image[:,:,ti] = sqrt.(diag_cov_XB(Σ, B', nf, p, nw)[1:nbau,:])
+        end
+    end  
+    return kp_ij, fused_image, fused_sd_image   
+end
+
+function hyperSTARS_1D_fusion_kr_dict(d,   
+                target_times::Union{AbstractVector{<:Real}, UnitRange{<:Real}} = [1],
+                smooth::Bool = false,
+                spatial_mod::Function = mat32_corD,                                         
+                obs_operator::Function = unif_weighted_obs_operator,
+                state_in_cov::Bool = true,
+                cov_wt::Real = 0.3,
+                tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
+                ar_phi = 1.0) 
+
+    measurements = @views d[:measurements]
+    target_coords = @views d[:target_coords]
+    kp_ij = @views d[:kp_ij]
+    prior_mean = @views d[:prior_mean]
+    prior_var = @views d[:prior_var]
+    model_pars = @views d[:model_pars]
+
+    nbau = size(kp_ij,1)
+    ni = size(measurements)[1] 
+    # println(ni)
+    n = size(target_coords)[1] # number of target resolution grid cells
+    p = 1 # 1D 
+
+    nnobs = Vector{Int64}(undef, ni)
+    nwobs = Vector{Int64}(undef, ni)
+    t0v = Vector{Int64}(undef, ni)
+    ttv = Vector{Int64}(undef, ni)
+
+    for i in 1:ni
+        nnobs[i] = size(measurements[i].data)[1]
+        nwobs[i] = size(measurements[i].data)[2]
+        t0v[i] = measurements[i].dates[1]
+        ttv[i] = measurements[i].dates[end]
+    end
+
+    t0 = minimum(t0v)
+    tt = maximum(ttv)
+    tp = maximum(target_times);
+    tpl = minimum(target_times)
+
+    if smooth
+        times = minimum([t0,tpl]):maximum([tt,tp])
+    else
+        times = minimum([t0,tpl]):tp
+    end
+
+    nsteps = size(times)[1]
+
+    data_kp = falses(ni,nsteps)
+
+    ## build observation operator, stack observations and variances 
+    Hss = Vector(undef,ni)
+
+    for (i,x) in enumerate(measurements)
+        Hss[i] = obs_operator(x.coords, target_coords, x.spatial_resolution) # kwargs for uniform needs :target_resolution, # kwargs for gaussian needs :scale, :p
+        data_kp[i,in(measurements[i].dates).(times)] .= true
+    end
+
+    H = Matrix(vcat(Hss...))
+
+    dd = pairwise(Euclidean(1e-12), target_coords, dims=1)
+    Q = model_pars[1] .* spatial_mod(dd, model_pars[2:end]) 
+
+    ## Diagonal transition matrices
+    F = UniformScaling(ar_phi)
+
+    # x0 = prior_mean[:] # don't need this but here to help with synergizing code later
+    # P0 = Diagonal(prior_var[:]) # just assuming diagonal C0
+
+    filtering_means = zeros(n,nsteps+1)
+    filtering_covs = zeros(n,n,nsteps+1)
+    filtering_prec = zeros(n,nsteps+1)
+
+    predicted_means = zeros(n,nsteps)
+    predicted_covs = zeros(n,n,nsteps)
+
+    @views filtering_means[:,1] = prior_mean
+    @views filtering_covs[:,:,1] = Diagonal(prior_var)
+    @views filtering_prec[:,1] = 1.0 ./ sqrt.(prior_var)
+
+    fused_image = zeros(nbau,1,size(target_times,1))
+    fused_sd_image = zeros(nbau,1,size(target_times,1))
+
+    kp_times = findall(times .∈ Ref(target_times))
+
+    x_pred = zeros(n)
+    P_pred = zeros(n,n)
+    x_new = zeros(n)
+    P_new = zeros(n,n)
+
+    FPpred = similar(P_pred)
+
+    Qf = zeros(n,n)
+    nobs = size.(Hss,1)
+    ## bunch of reusable memory in here...
+    for (t,t2) in enumerate(times)
+        Qf .= Q
+
+        if state_in_cov 
+            Qf .*= cov_wt
+
+            Xtt = reshape(filtering_means[:,1:t], (n,p,t))[:,:,:]
+            Wt = @views reshape(filtering_prec[:,1:t], (n,p,t))
+
+            Xtt .*= Wt
+            Xtt ./= sum(Wt, dims=3)
+
+            x2 = [model_pars[1], tscov_pars...]
+            mul!(Qf, state_cov(Xtt[:,1,:]',x2), I, 1.0 .- cov_wt,cov_wt)
+
+        end
+
+        ys = Float64[]
+        vs = Float64[]
+        kps = falses(size(H,1))
+        for x in findall(data_kp[:,t])
+            kt = measurements[x].dates .== t2
+            yss = @views measurements[x].data[:,:,kt][:]
+            vss = @views measurements[x].uq[:,kt][:]
+            ym = .!isnan.(yss)
+            append!(ys,yss[ym])
+            append!(vs,vss[1] .* ones(sum(ym)))
+            if x==1
+                nstart = 1
+            else
+                nstart = sum(nobs[1:x-1])+1
+            end  
+            kps[nstart:nstart+nobs[x]-1] .= ym
+        end
+
+        Nobs = sum(kps)
+        Hs = @views H[kps,:]
+
+        # Predictive mean and covariance here
+        # x_pred = F * filtering_means[:,t] # filtering_means[1], covs[1] is prior mean
+        # P_pred = F * filtering_covs[:,:,t] * F' + Qf
+        P_pred .= Qf
+        mul!(x_pred, F, @view(filtering_means[:,t]))
+        mul!(FPpred, F, @view(filtering_covs[:,:,t]))
+        mul!(P_pred, FPpred, F', 1.0, 1.0)
+
+        predicted_means[:,t] = x_pred
+        predicted_covs[:,:,t] = P_pred
+
+        # Filtering is done here
+        if Nobs == 0
+            filtering_means[:,t+1] = x_pred
+            filtering_covs[:,:,t+1] = P_pred
+            filtering_prec[:,t+1] = 1.0 ./ sqrt.(diag(P_pred))
+        else
+            x_new, P_new = kalman_1D_filter_kr(Hs, ys, vs, x_pred, P_pred)
+            
+            filtering_means[:,t+1] = x_new
+            filtering_covs[:,:,t+1] = P_new
+            filtering_prec[:,t+1] = 1.0 ./ sqrt.(diag(P_new))
+        end
+    end
+
+    ## update with back projection
+    if smooth
+        st = minimum(kp_times)
+        smoothed_means, smoothed_covs = smooth_series(F, predicted_means[:,st:end], predicted_covs[:,:,st:end], filtering_means[:,st:end], filtering_covs[:,:,st:end])
+        for (ti,t2) in enumerate(kp_times .- st .+ 1)
+            fused_image[:,1,ti] = @views smoothed_means[1:nbau,t2]
+            fused_sd_image[:,1,ti] = @views sqrt.(diag(smoothed_covs[1:nbau,1:nbau,t2]))
+        end
+    else
+        for (ti,t2) in enumerate(kp_times)
+            fused_image[:,1,ti] = @views filtering_means[1:nbau,t2+1]
+            fused_sd_image[:,1,ti] = @views sqrt.(diag(filtering_covs[1:nbau,1:nbau,t2+1]))
         end
     end  
     return kp_ij, fused_image, fused_sd_image   
@@ -1536,6 +1873,113 @@ function scene_inds_fusion_pmap(inst_data::AbstractVector{InstrumentData},
     # is processed by `hyperSTARS_fusion_kr_dict`. `pmap` distributes these tasks.
     result = @showprogress pmap(x -> hyperSTARS_fusion_kr_dict(x,  
                     target_waves, spectral_mean, B,
+                    target_times, smooth, spatial_mod, 
+                    obs_operator, state_in_cov, cov_wt, tscov_pars, ar_phi) , T );
+    
+    # Reconstruct the full fused image and standard deviation image from the results
+    # obtained from each individual window.
+    for i in 1:nr
+        # `result[i][1]` contains `kp_ij` (Cartesian indices of the target BAUs for window `i`).
+        # `result[i][2]` contains `fused_image` for window `i`.
+        # `result[i][3]` contains `fused_sd_image` for window `i`.
+        @views fused_image[result[i][1],:,:] = result[i][2]
+        @views fused_sd_image[result[i][1],:,:] = result[i][3]
+    end
+    
+    return fused_image, fused_sd_image
+
+end
+
+
+function scene_inds_1D_fusion_pmap(inst_data::AbstractVector{InstrumentData},
+                      inst_geodata::AbstractVector{InstrumentGeoData},
+                      window_geodata::InstrumentGeoData,
+                      target_geodata::InstrumentGeoData,
+                      inds::AbstractArray{<:Real},
+                      prior_mean::AbstractArray{<:Real},
+                      prior_var::AbstractArray{<:Real},
+                      model_pars::AbstractArray{<:Real};
+                      nsamp::Integer = 100,
+                      window_buffer::Integer = 2,
+                      target_times::Union{AbstractVector{<:Real}, UnitRange{<:Real}} = [1], 
+                      smooth::Bool = false,           
+                      spatial_mod::Function = mat32_corD,                                           
+                      obs_operator::Function = unif_weighted_obs_operator,
+                      state_in_cov::Bool = true,
+                      cov_wt::Real = 0.3,
+                      tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
+                      ar_phi::Real = 1.0,
+                      window_radius::Real = 0.0)
+
+    ### Define target extent and target + buffer extent
+    # Extract geospatial parameters for windows and target grid.
+    window_csize = @views window_geodata.cell_size
+    target_csize = @views target_geodata.cell_size
+    window_origin = @views window_geodata.origin
+    target_origin = @views target_geodata.origin
+    target_ndims = @views target_geodata.ndims # Dimensions of the overall target grid
+
+    nsteps = size(target_times)[1] # Number of target time steps for output
+    
+    # Pre-allocate arrays for the final fused image and its standard deviation across the entire scene.
+    # Dimensions: (target_x, target_y, latent_spectral_components, time_steps)
+    fused_image = zeros(target_ndims[1], target_ndims[2], 1, nsteps);
+    fused_sd_image = zeros(target_ndims[1], target_ndims[2], 1, nsteps);
+    
+    # Generate all (k,l) indices for each window in the scene.
+    # inds = hcat(repeat(1:nwindows[1], inner=nwindows[2]), repeat(1:nwindows[2], outer=nwindows[1]))
+    
+    nr = size(inds,1) # Total number of spatial windows
+
+    # Prepare input dictionaries for each spatial window.
+    # This loop is essentially the content of the `create_data_dicts` function,
+    # inlined here to explicitly show how `T` is constructed before `pmap`.
+    T = []
+    for ii in 1:nr
+        k,l = inds[ii,:]
+
+        window_bbox = bbox_from_centroid(window_origin .+ [k-1, l-1].*window_csize, window_csize)
+        buffer_ext = window_bbox .+ window_buffer*[-1.01,1.01]*target_csize'
+        all_exts = [Matrix(find_overlapping_ext(buffer_ext[1,:], buffer_ext[2,:], x.origin, x.cell_size)) for x in inst_geodata]
+        res_flag = [x.fidelity for x in inst_geodata] 
+        # for i in findall(res_flag .== 2)
+        #     exx = window_bbox .+ [-nb_coarse - 0.01,nb_coarse + 0.01]*inst_geodata[i].cell_size'
+        #     push!(all_exts, exx)
+        # end
+
+        ## replace nb_coarse with window radius (actually a square)
+        exx = window_bbox .+ [-window_radius - 0.01,window_radius + 0.01]
+        push!(all_exts, exx)
+        
+
+        full_ext = merge_extents(all_exts, sign.(target_csize))
+        target_ij = find_all_ij_ext(window_bbox[1,:], window_bbox[2,:], target_origin, target_csize, target_ndims; inclusive=false)
+        ss_ij = find_all_ij_ext(buffer_ext[1,:], buffer_ext[2,:], target_origin, target_csize, target_ndims)
+        if any(res_flag .== 2)
+            ss_ij = unique(vcat(ss_ij, sobol_bau_ij(full_ext[1,:], full_ext[2,:], target_origin, target_csize, target_ndims; nsamp=nsamp)),dims=1)
+        end
+        ss_xy = get_sij_from_ij(ss_ij, target_origin, target_csize)
+        measurements, ss_ij = organize_data(full_ext, inst_geodata, inst_data, target_geodata, ss_xy, ss_ij, res_flag)
+        bau_ij = unique(vcat(target_ij, ss_ij),dims=1)
+        bau_coords = get_sij_from_ij(bau_ij, target_origin, target_csize)
+        bau_ci = CartesianIndex.(bau_ij[:,1],bau_ij[:,2])
+        prior_mean_sub = @views prior_mean[bau_ci,:][:]
+        prior_var_sub = @views prior_var[bau_ci,:][:]
+        tind = CartesianIndex.(target_ij[:,1], target_ij[:,2])
+
+        d = Dict()
+        d[:measurements] = measurements
+        d[:target_coords] = bau_coords
+        d[:kp_ij] = tind
+        d[:prior_mean] = prior_mean_sub
+        d[:prior_var] = prior_var_sub
+        d[:model_pars] = @views model_pars[k,l,:,:]
+        push!(T,d)
+    end
+
+    # Perform parallel fusion using `pmap`. Each element of `T` (a dictionary for one window)
+    # is processed by `hyperSTARS_fusion_kr_dict`. `pmap` distributes these tasks.
+    result = @showprogress pmap(x -> hyperSTARS_1D_fusion_kr_dict(x,  
                     target_times, smooth, spatial_mod, 
                     obs_operator, state_in_cov, cov_wt, tscov_pars, ar_phi) , T );
     
