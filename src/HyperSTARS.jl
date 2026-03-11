@@ -1291,7 +1291,12 @@ function hyperSTARS_fusion_kr_dict(d,
             push!(ys,yss[ym,:] .- Hms[x]' .- measurements[x].bias[:,kt]');
         end
 
-        Nobs = sum(size(x.Hs,1)*size(x.Hw,1) for x in Ms)
+        if length(ys) == 0
+            Nobs = 0
+        else
+            Nobs = sum(size(x.Hs,1)*size(x.Hw,1) for x in Ms)
+        end
+        
         Np = size(Qf,1)
 
         # Predictive mean and covariance here
@@ -1307,6 +1312,7 @@ function hyperSTARS_fusion_kr_dict(d,
 
         # Filtering is done here
         if Nobs == 0
+        # if length(ys) == 0
             filtering_means[:,t+1] = x_pred
             filtering_covs[:,:,t+1] = P_pred
             filtering_prec[:,t+1] = 1.0 ./ sqrt.(diag(P_pred))
