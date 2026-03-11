@@ -8,6 +8,7 @@ using JLD2 # For loading data stored in JLD2 format (Julia's binary data format)
 using Distributed # Crucial for parallel processing using Julia's `pmap`
 using MultivariateStats # For performing Principal Component Analysis (PCA)
 using LinearAlgebra # Provides `Diagonal`, `I` (identity matrix), and other linear algebra utilities
+using Revise
 using HyperSTARS 
 
 # Add worker processes for parallel execution.
@@ -208,7 +209,7 @@ end
             model_pars; # Spatial model parameters for each latent component
             nsamp=50, # Number of Basic Area Units (BAUs) to subsample within a window for efficiency
             window_buffer = 3, # Number of buffer pixels around each window to avoid edge effects
-            target_times = 1:4, # Time steps for which to produce fused output (e.g., day 1 to day 4)
+            target_times = 1:2, # Time steps for which to produce fused output (e.g., day 1 to day 4)
             smooth = false, # Flag: `false` means only Kalman filtering (forward pass); `true` would also apply smoothing (backward pass)
             spatial_mod = HyperSTARS.mat32_corD, # Spatial covariance function (Matern 3/2 with precomputed distances)
             obs_operator = HyperSTARS.unif_weighted_obs_operator_centroid, # Observation operator (uniform weighting based on centroid overlap)
