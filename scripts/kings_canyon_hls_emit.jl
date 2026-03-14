@@ -268,6 +268,37 @@ function get_pca(data30m_list)
     return B, mm, sx, vrs
 end
 
+function first_tif_file(dir::String)
+    for (root, _, files) in walkdir(dir)
+        for f in files
+            if endswith(lowercase(f), ".tif")
+                return joinpath(root, f)
+            end
+        end
+    end
+    error("No .tif files found in $dir")
+end
+
+function write_multiband_geotiff(path::String, data::AbstractArray{<:Real,3}, origin::Vector{<:Real}, cell_size::Vector{<:Real}, proj_wkt::AbstractString)
+    ny, nx, nbands = size(data)
+    data32 = Float32.(data)
+    x0 = Float64(origin[1] - 0.5 * cell_size[1])
+    y0 = Float64(origin[2] - 0.5 * cell_size[2])
+    dx = Float64(cell_size[1])
+    dy = Float64(cell_size[2])
+    geotransform = [x0, dx, 0.0, y0, 0.0, dy]
+
+    ArchGDAL.create(path; driver=ArchGDAL.getdriver("GTiff"), width=nx, height=ny, nbands=nbands, dtype=Float32, options=["COMPRESS=LZW"]) do ds
+        ArchGDAL.setgeotransform!(ds, geotransform)
+        if !isempty(proj_wkt)
+            ArchGDAL.setproj!(ds, proj_wkt)
+        end
+        for bi in 1:nbands
+            ArchGDAL.write!(ds, data32[:,:,bi], bi)
+        end
+    end
+end
+
 
 
 
@@ -315,6 +346,8 @@ end
 @everywhere using LinearAlgebra
 @everywhere BLAS.set_num_threads(1)
 
+target_times = 1:2
+
 @time fused_images, fused_sd_images = scene_fusion_pmap(data30m_list,
             inst30m_geodata,
             window30m_geodata,
@@ -326,7 +359,7 @@ end
             model_pars; 
             nsamp=50,
             window_buffer = 4,
-            target_times = 1:2, 
+            target_times = target_times, 
             smooth = false,           
             spatial_mod = exp_corD,                                           
             obs_operator = unif_weighted_obs_operator_centroid,
@@ -336,4 +369,23 @@ end
             ar_phi=1.0,
             window_radius=100.0);
 
-# fused_images and fused_sd_images are y,x,wavelength,time arrays, need to write to raster or .nc as desired            
+# Write fused outputs as one multi-band GeoTIFF per day (mean + sd)
+output_dir = expanduser("~/data/EMIT-HLS-fusion-output")
+mkpath(output_dir)
+
+sample_tif = first_tif_file(joinpath(dir_path, "Kings_Canyon_HLS/L30"))
+proj_wkt = ArchGDAL.read(sample_tif) do ds
+    ArchGDAL.getproj(ds)
+end
+
+for (out_ti, global_ti) in enumerate(target_times)
+    date_str = Dates.format(all_dates[global_ti], "yyyymmdd")
+
+    mean_path = joinpath(output_dir, "fused_mean_$(date_str).tif")
+    sd_path = joinpath(output_dir, "fused_sd_$(date_str).tif")
+
+    write_multiband_geotiff(mean_path, fused_images[:,:,:,out_ti], hls_l30_origin, hls_l30_csize, proj_wkt)
+    write_multiband_geotiff(sd_path, fused_sd_images[:,:,:,out_ti], hls_l30_origin, hls_l30_csize, proj_wkt)
+end
+
+println("Wrote fused GeoTIFF outputs to: $output_dir")
