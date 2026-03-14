@@ -49,6 +49,19 @@ function log_array_summary(label::AbstractString, arr)
     @info "Array summary" label=label size=size(arr) total_count=total_count finite_count=finite_count finite_fraction=(finite_count / total_count) nan_count=nan_count inf_count=inf_count min=mn max=mx mean=mean_val std=std_val p01=p01 p50=p50 p99=p99
 end
 
+function log_file_date_list(label::AbstractString, files::Vector{String}, dates::Vector{Date})
+    nd = min(length(files), length(dates))
+    if nd == 0
+        @info "No dated files to list" label=label
+        return
+    end
+
+    file_date_pairs = collect(zip(dates[1:nd], files[1:nd]))
+    sort!(file_date_pairs, by=x -> x[1])
+    listing = ["$(Dates.format(d, "yyyy-mm-dd")) => $(f)" for (d, f) in file_date_pairs]
+    @info "File/date list" label=label count=length(listing) entries=listing
+end
+
 ######### Wrapper functions to reduce memory and compiling time
 function get_hls_data(dir, bands, date_range)
     @info "Loading HLS data" directory=dir bands=bands date_range=date_range
@@ -67,8 +80,10 @@ function get_hls_data(dir, bands, date_range)
         end
         @info "Found HLS files" band=band nfiles=length(band_files)
         band_dates = [Date(match(r"\d{8}", f).match, "yyyymmdd") for f in band_files] ## extract dates from tif filenames
+        log_file_date_list("HLS available ($(band))", band_files, band_dates)
         kp_dates = date_range[1] .<= band_dates .<= date_range[2] ## find all available dates within target date range
         @info "Filtered HLS files by date" band=band selected_files=count(kp_dates) date_start=date_range[1] date_end=date_range[2]
+        log_file_date_list("HLS selected ($(band))", band_files[kp_dates], band_dates[kp_dates])
         band_rasters = [Raster(x, lazy=true) for x in band_files[kp_dates]] ## read geotiffs for all dates found in date range, using lazy loading
         if isempty(band_rasters)
             @warn "No rasters found for band $band in specified date range"
@@ -129,8 +144,10 @@ function get_emit(dir_path, emit_dir, date_range)
     emit_files = glob("*.tif", emit_dir)
     @info "Found EMIT files" nfiles=length(emit_files)
     emit_dates = [Date(match(r"\d{8}", f).match, "yyyymmdd") for f in emit_files] ## extract dates from tif filenames
+    log_file_date_list("EMIT available", emit_files, emit_dates)
     kp_dates = date_range[1] .<= emit_dates .<= date_range[2] ## find all available dates within target date range
     @info "Filtered EMIT files by date" selected_files=count(kp_dates) date_start=date_range[1] date_end=date_range[2]
+    log_file_date_list("EMIT selected", emit_files[kp_dates], emit_dates[kp_dates])
 
     # Use lazy=true to avoid loading entire large files into memory
     emit_rasters = [Raster(x, lazy=true)[:,:,good_wavelength_inds] for x in emit_files[kp_dates]] # read emit rasters for dates in range, only keep good wavelengths
