@@ -25,6 +25,30 @@ addprocs(Sys.CPU_THREADS - 1) ## workers (using Distributed package), Check how 
 global_logger(ConsoleLogger(stdout, Logging.Info))
 @info "Initialized logging and worker pool" workers=nworkers() cpu_threads=Sys.CPU_THREADS
 
+function log_array_summary(label::AbstractString, arr)
+    total_count = length(arr)
+    finite_mask = isfinite.(arr)
+    finite_count = count(finite_mask)
+    nan_count = count(isnan, arr)
+    inf_count = count(isinf, arr)
+
+    if finite_count == 0
+        @warn "Array summary (no finite values)" label=label size=size(arr) total_count=total_count finite_count=finite_count nan_count=nan_count inf_count=inf_count
+        return
+    end
+
+    finite_vals = arr[finite_mask]
+    mn = minimum(finite_vals)
+    mx = maximum(finite_vals)
+    mean_val = mean(finite_vals)
+    std_val = std(finite_vals)
+    p01 = quantile(finite_vals, 0.01)
+    p50 = quantile(finite_vals, 0.50)
+    p99 = quantile(finite_vals, 0.99)
+
+    @info "Array summary" label=label size=size(arr) total_count=total_count finite_count=finite_count finite_fraction=(finite_count / total_count) nan_count=nan_count inf_count=inf_count min=mn max=mx mean=mean_val std=std_val p01=p01 p50=p50 p99=p99
+end
+
 ######### Wrapper functions to reduce memory and compiling time
 function get_hls_data(dir, bands, date_range)
     @info "Loading HLS data" directory=dir bands=bands date_range=date_range
@@ -88,6 +112,7 @@ function get_hls_data(dir, bands, date_range)
     
     # Keep y,x,band,time order to match expected data layout (nx x ny x nw x T)
     @info "Completed HLS load" directory=dir output_size=size(hls_array)
+    log_array_summary("HLS cube: $(basename(normpath(dir)))", hls_array)
     return hls_array, time_dates, ref_raster
 end
 
@@ -135,6 +160,7 @@ function get_emit(dir_path, emit_dir, date_range)
 
     emit_array[.!isfinite.(emit_array) .| (emit_array .== -9999)] .= NaN ## replace missings and -9999 with nans
     @info "Completed EMIT load" output_size=size(emit_array)
+    log_array_summary("EMIT cube", emit_array)
     return emit_array, emit_dates[kp_dates], fwhm, wavelengths, ref_raster
 end
 
@@ -244,6 +270,10 @@ function get_data(dir_path, date_range)
     hls_l30_array = disallowmissing(hls_l30_raster);
     hls_s30_array = disallowmissing(hls_s30_raster);
     emit_array = disallowmissing(emit_raster);
+
+    log_array_summary("Input array HLS L30", hls_l30_array)
+    log_array_summary("Input array HLS S30", hls_s30_array)
+    log_array_summary("Input array EMIT", emit_array)
 
     ### create geospatial structs for each instrument
     # 4th element is spatial "fidelity": 0 for highest (target) spatial res, 1 for high but not target, 2 for coarse res (like PACE)
@@ -407,6 +437,8 @@ target_times = 1:2
             ar_phi=1.0,
             window_radius=100.0);
 @info "Scene fusion complete" fused_size=size(fused_images) fused_sd_size=size(fused_sd_images)
+log_array_summary("Fused mean (all target times)", fused_images)
+log_array_summary("Fused sd (all target times)", fused_sd_images)
 
 # Write fused outputs as one multi-band GeoTIFF per day (mean + sd)
 output_dir = expanduser("~/data/EMIT-HLS-fusion-output")
@@ -425,6 +457,9 @@ for (out_ti, global_ti) in enumerate(target_times)
     mean_path = joinpath(output_dir, "fused_mean_$(date_str).tif")
     sd_path = joinpath(output_dir, "fused_sd_$(date_str).tif")
     @info "Writing fused outputs for date" date=date_str mean_path=mean_path sd_path=sd_path
+
+    log_array_summary("Fused mean (date=$(date_str))", fused_images[:,:,:,out_ti])
+    log_array_summary("Fused sd (date=$(date_str))", fused_sd_images[:,:,:,out_ti])
 
     write_multiband_geotiff(mean_path, fused_images[:,:,:,out_ti], hls_l30_origin, hls_l30_csize, proj_wkt)
     write_multiband_geotiff(sd_path, fused_sd_images[:,:,:,out_ti], hls_l30_origin, hls_l30_csize, proj_wkt)
