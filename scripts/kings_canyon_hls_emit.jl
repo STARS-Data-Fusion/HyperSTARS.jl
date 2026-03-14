@@ -30,10 +30,18 @@ function get_hls_data(dir, bands, date_range)
     
     for band in bands 
         band_files = glob("*$(band)*.tif", joinpath(dir,band)) ## find all tif files in band subdirectory
+        if isempty(band_files)
+            @warn "No files found for band $band in $dir"
+            continue
+        end
         band_dates = [Date(match(r"\d{8}", f).match, "yyyymmdd") for f in band_files] ## extract dates from tif filenames
         kp_dates = date_range[1] .<= band_dates .<= date_range[2] ## find all available dates within target date range
         band_rasters = [Raster(x, lazy=true) for x in band_files[kp_dates]] ## read geotiffs for all dates found in date range, using lazy loading
-        if ref_raster === nothing && !isempty(band_rasters)
+        if isempty(band_rasters)
+            @warn "No rasters found for band $band in specified date range"
+            continue
+        end
+        if ref_raster === nothing
             ref_raster = band_rasters[1]
         end
         if time_dates === nothing
@@ -43,6 +51,10 @@ function get_hls_data(dir, bands, date_range)
         band_arrays = [Array(r) for r in band_rasters]
         push!(band_arrays_list, band_arrays)
     end ## loop over all bands
+
+    if isempty(band_arrays_list)
+        error("No valid HLS raster data found in $dir for date range $(date_range[1]) to $(date_range[2]).")
+    end
 
     # Get dimensions from first raster
     ny, nx = size(band_arrays_list[1][1])
@@ -150,6 +162,12 @@ function get_data(dir_path, date_range)
     hls_s30_dir = joinpath(dir_path,"Kings_Canyon_HLS/S30/")
     emit_dir = joinpath(dir_path,"Kings_Canyon_EMIT")
 
+    for required_dir in [hls_l30_dir, hls_s30_dir, emit_dir]
+        if !isdir(required_dir)
+            error("Required data directory not found: $required_dir")
+        end
+    end
+
     #### loading HLS data from tif
     hls_l30_bands = ["coastal_aerosol", "blue", "green", "red", "NIR", "SWIR1", "SWIR2"]
     hls_s30_bands = ["coastal_aerosol", "blue", "green", "red", "rededge1","rededge2","rededge3", "NIR_broad", "NIR", "SWIR1", "SWIR2"]
@@ -161,6 +179,19 @@ function get_data(dir_path, date_range)
     S30_srf, L30_srf, hls_l30_waves, hls_s30_waves = get_srf(dir_path)
 
     emit_raster, emit_dates, fwhm_emit, emit_waves, emit_ref = get_emit(dir_path, emit_dir, date_range)
+
+    if isempty(hls_l30_dates)
+        error("No L30 HLS observations found for date range $(date_range[1]) to $(date_range[2]) in $hls_l30_dir")
+    end
+    if isempty(hls_s30_dates)
+        error("No S30 HLS observations found for date range $(date_range[1]) to $(date_range[2]) in $hls_s30_dir")
+    end
+    if isempty(emit_dates)
+        error("No EMIT observations found for date range $(date_range[1]) to $(date_range[2]) in $emit_dir")
+    end
+    if emit_ref === nothing || hls_s30_ref === nothing || hls_l30_ref === nothing
+        error("Missing reference raster(s); verify HLS/EMIT files exist and match the requested date range.")
+    end
 
     ###### Fusion setup
     emit_origin = get_centroid_origin_raster(emit_ref)
@@ -241,11 +272,11 @@ end
 
 
 #### Target fusion date range
-date_range = [Date("2022-08-01"), Date("2022-08-31")]
+date_range = [Date("2024-03-25"), Date("2024-07-27")]
 
 #### parent directory
 # dir_path = "/Users/maggiej/Documents/Hyperspectral_DataFusion/Data/KingsCanyon/"
-dir_path = "/gpfs/scratch/refl-datafusion-trtd/"
+dir_path = expanduser("~/data/")
 
 data30m_list, inst30m_geodata, all_dates = get_data(dir_path, date_range)
 
