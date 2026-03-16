@@ -7,7 +7,7 @@ The HyperSTARS data fusion pipeline requires spectral calibration data to proper
 ## Files Generated
 
 ### 1. `HLS_L30_srf.csv` - Landsat-8 Spectral Response Functions
-- **Location:** `~/data/HLS_L30_srf.csv`
+- **Location:** `src/HLS_L30_srf.csv` (default). Can be overridden with `HYPERSTARS_METADATA_DIR`.
 - **Size:** ~98 KB
 - **Content:** Spectral response curves for Landsat-8 (OLI sensor) 7 reflective bands
 - **Bands Included:**
@@ -22,7 +22,7 @@ The HyperSTARS data fusion pipeline requires spectral calibration data to proper
 - **Columns:** Wavelength (nm) + 8 band columns (7 usable + 1 thermal placeholder)
 
 ### 2. `HLS_S30_srf.csv` - Sentinel-2 Spectral Response Functions
-- **Location:** `~/data/HLS_S30_srf.csv`
+- **Location:** `src/HLS_S30_srf.csv` (default). Can be overridden with `HYPERSTARS_METADATA_DIR`.
 - **Size:** ~148 KB
 - **Content:** Spectral response curves for Sentinel-2 (MSI sensor) 11 bands
 - **Bands Included:**
@@ -42,7 +42,7 @@ The HyperSTARS data fusion pipeline requires spectral calibration data to proper
 - **Special Features:** For matching bands with Landsat-8, this file uses the same SRF as L30 (ensuring consistency in overlapping wavelengths)
 
 ### 3. `EMIT_metadata.csv` - EMIT Sensor Metadata
-- **Location:** `~/data/EMIT_metadata.csv`
+- **Location:** `src/EMIT_metadata.csv` (default). Can be overridden with `HYPERSTARS_METADATA_DIR`.
 - **Size:** ~6.2 KB
 - **Content:** Wavelength and quality information for EMIT (Earth Surface Mineral and Temperature) hyperspectral sensor
 - **Band Information:**

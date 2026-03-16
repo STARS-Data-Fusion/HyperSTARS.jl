@@ -27,6 +27,8 @@ using Statistics
 using LinearAlgebra
 @everywhere using SparseArrays
 
+const DEFAULT_METADATA_DIR = joinpath(pkgdir(HyperSTARS), "src")
+
 @everywhere include(joinpath(@__DIR__, "../src/spatial_utils_ll.jl"))
 @everywhere include(joinpath(@__DIR__, "../src/spatial_utils.jl"))  
 @everywhere include(joinpath(@__DIR__, "../src/resampling_utils.jl"))
@@ -86,7 +88,7 @@ function get_hls_data(dir, bands, date_range)
     return hls_array, time_dates, ref_raster
 end
 
-function get_emit(dir_path, emit_dir, date_range; metadata_dir=dir_path)
+function get_emit(emit_dir, date_range; metadata_dir=DEFAULT_METADATA_DIR)
     emit_metadata, _ = readdlm(joinpath(metadata_dir, "EMIT_metadata.csv"), ',', header=true)
     wavelengths = emit_metadata[emit_metadata[:,2].==1,1]
     fwhm = emit_metadata[emit_metadata[:,2].==1,3]
@@ -124,7 +126,7 @@ function get_emit(dir_path, emit_dir, date_range; metadata_dir=dir_path)
     return emit_array, emit_dates[kp_dates], fwhm, wavelengths, ref_raster
 end
 
-function get_srf(dir_path; metadata_dir=dir_path)
+function get_srf(; metadata_dir=DEFAULT_METADATA_DIR)
     l30_srf_path = joinpath(metadata_dir, "HLS_L30_srf.csv")
     s30_srf_path = joinpath(metadata_dir, "HLS_S30_srf.csv")
     
@@ -154,7 +156,7 @@ function get_srf(dir_path; metadata_dir=dir_path)
     return S30_srf, L30_srf, hls_l30_waves, hls_s30_waves
 end
 
-function get_data(dir_path, date_range)
+function get_data(dir_path, date_range; metadata_dir=DEFAULT_METADATA_DIR)
     hls_l30_dir = joinpath(dir_path,"Kings_Canyon_HLS/L30/")
     hls_s30_dir = joinpath(dir_path,"Kings_Canyon_HLS/S30/")
     emit_dir = joinpath(dir_path,"Kings_Canyon_EMIT")
@@ -165,9 +167,9 @@ function get_data(dir_path, date_range)
     hls_l30_raster, hls_l30_dates, hls_l30_ref = get_hls_data(hls_l30_dir, hls_l30_bands, date_range)
     hls_s30_raster, hls_s30_dates, hls_s30_ref = get_hls_data(hls_s30_dir, hls_s30_bands, date_range)
 
-    S30_srf, L30_srf, hls_l30_waves, hls_s30_waves = get_srf(dir_path; metadata_dir=metadata_dir)
+    S30_srf, L30_srf, hls_l30_waves, hls_s30_waves = get_srf(metadata_dir=metadata_dir)
 
-    emit_raster, emit_dates, fwhm_emit, emit_waves, emit_ref = get_emit(dir_path, emit_dir, date_range; metadata_dir=metadata_dir)
+    emit_raster, emit_dates, fwhm_emit, emit_waves, emit_ref = get_emit(emit_dir, date_range; metadata_dir=metadata_dir)
 
     emit_origin = get_centroid_origin_raster(emit_ref)
     hls_s30_origin = get_centroid_origin_raster(hls_s30_ref)
@@ -229,7 +231,7 @@ date_range = [Date("2022-08-13"), Date("2022-08-17")]
 println("Date range: $(date_range[1]) to $(date_range[2])")
 
 dir_path = get(ENV, "HYPERSTARS_DATA_DIR", "/gpfs/scratch/refl-datafusion-trtd/")
-metadata_dir = get(ENV, "HYPERSTARS_METADATA_DIR", dir_path)
+metadata_dir = get(ENV, "HYPERSTARS_METADATA_DIR", DEFAULT_METADATA_DIR)
 println("Data path: $dir_path")
 println("Metadata path: $metadata_dir")
 
@@ -237,7 +239,7 @@ println("Metadata path: $metadata_dir")
 mem_start = Sys.maxrss() / 1024^2
 
 println("\n[1/5] Loading data...")
-@time data30m_list, inst30m_geodata, all_dates = get_data(dir_path, date_range)
+@time data30m_list, inst30m_geodata, all_dates = get_data(dir_path, date_range; metadata_dir=metadata_dir)
 mem_after_load = Sys.maxrss() / 1024^2
 println("Memory: $(round(mem_after_load, digits=1)) MB (+$(round(mem_after_load - mem_start, digits=1)) MB)")
 

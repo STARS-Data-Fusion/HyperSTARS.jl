@@ -22,6 +22,8 @@ addprocs(Sys.CPU_THREADS - 1) ## workers (using Distributed package), Check how 
 
 @everywhere using HyperSTARS
 
+const DEFAULT_METADATA_DIR = joinpath(pkgdir(HyperSTARS), "src")
+
 global_logger(ConsoleLogger(stdout, Logging.Info))
 @info "Initialized logging and worker pool" workers=nworkers() cpu_threads=Sys.CPU_THREADS
 
@@ -132,9 +134,9 @@ function get_hls_data(dir, bands, date_range)
 end
 
 #### loading EMIT data from EMIT directory
-function get_emit(dir_path, emit_dir, date_range)
-    @info "Loading EMIT metadata" path=joinpath(dir_path,"EMIT_metadata.csv")
-    emit_metadata, _ = readdlm(joinpath(dir_path,"EMIT_metadata.csv"), ',', header=true)
+function get_emit(emit_dir, date_range; metadata_dir=DEFAULT_METADATA_DIR)
+    @info "Loading EMIT metadata" path=joinpath(metadata_dir,"EMIT_metadata.csv")
+    emit_metadata, _ = readdlm(joinpath(metadata_dir,"EMIT_metadata.csv"), ',', header=true)
     wavelengths = emit_metadata[emit_metadata[:,2].==1,1]
     fwhm = emit_metadata[emit_metadata[:,2].==1,3]
     good_wavelengths = emit_metadata[:,2]
@@ -182,18 +184,18 @@ function get_emit(dir_path, emit_dir, date_range)
 end
 
 ###### spectral response functions for landsat (L30) and sentinel (S30)
-function get_srf(dir_path)
-    l30_srf_path = joinpath(dir_path, "HLS_L30_srf.csv")
-    s30_srf_path = joinpath(dir_path, "HLS_S30_srf.csv")
+function get_srf(; metadata_dir=DEFAULT_METADATA_DIR)
+    l30_srf_path = joinpath(metadata_dir, "HLS_L30_srf.csv")
+    s30_srf_path = joinpath(metadata_dir, "HLS_S30_srf.csv")
     @info "Loading SRF files" l30_path=l30_srf_path s30_path=s30_srf_path
     
     if !isfile(l30_srf_path)
         error("HLS_L30_srf.csv not found at $(l30_srf_path). " *
-              "Please ensure spectral response function files are in your data directory.")
+              "Please ensure spectral response function files are in your metadata directory.")
     end
     if !isfile(s30_srf_path)
         error("HLS_S30_srf.csv not found at $(s30_srf_path). " *
-              "Please ensure spectral response function files are in your data directory.")
+              "Please ensure spectral response function files are in your metadata directory.")
     end
     
     HLS_L30_srf, _ = readdlm(l30_srf_path, ',', header=true)
@@ -220,7 +222,7 @@ function get_srf(dir_path)
 end
 
 #### process EMIT and HLS, return data and geodata structs for fusion model
-function get_data(dir_path, date_range)
+function get_data(dir_path, date_range; metadata_dir=DEFAULT_METADATA_DIR)
     @info "Preparing data inputs" base_directory=dir_path date_range=date_range
     #### product directory
     hls_l30_dir = joinpath(dir_path,"Kings_Canyon_HLS/L30/")
@@ -243,9 +245,9 @@ function get_data(dir_path, date_range)
     hls_s30_raster, hls_s30_dates, hls_s30_ref = get_hls_data(hls_s30_dir, hls_s30_bands, date_range)
     @info "Loaded HLS products" l30_size=size(hls_l30_raster) s30_size=size(hls_s30_raster)
 
-    S30_srf, L30_srf, hls_l30_waves, hls_s30_waves = get_srf(dir_path)
+    S30_srf, L30_srf, hls_l30_waves, hls_s30_waves = get_srf(metadata_dir=metadata_dir)
 
-    emit_raster, emit_dates, fwhm_emit, emit_waves, emit_ref = get_emit(dir_path, emit_dir, date_range)
+    emit_raster, emit_dates, fwhm_emit, emit_waves, emit_ref = get_emit(emit_dir, date_range; metadata_dir=metadata_dir)
     @info "Loaded EMIT product" emit_size=size(emit_raster)
 
     if isempty(hls_l30_dates)
@@ -389,9 +391,11 @@ date_range = [Date("2024-03-25"), Date("2024-07-27")]
 #### parent directory
 # dir_path = "/Users/maggiej/Documents/Hyperspectral_DataFusion/Data/KingsCanyon/"
 dir_path = expanduser("~/data/")
+metadata_dir = get(ENV, "HYPERSTARS_METADATA_DIR", DEFAULT_METADATA_DIR)
 @info "Using base data directory" directory=dir_path
+@info "Using metadata directory" directory=metadata_dir
 
-data30m_list, inst30m_geodata, all_dates = get_data(dir_path, date_range)
+data30m_list, inst30m_geodata, all_dates = get_data(dir_path, date_range; metadata_dir=metadata_dir)
 @info "Loaded all input datasets" all_dates_count=length(all_dates)
 
 ## pull landsat and emit spatial information for target resolution grids

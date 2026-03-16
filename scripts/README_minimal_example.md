@@ -132,10 +132,12 @@ Ensure data directories exist and contain data for the date range:
   ├── Kings_Canyon_HLS/
   │   ├── L30/
   │   └── S30/
-  ├── Kings_Canyon_EMIT/
-  ├── HLS_L30_srf.csv
-  ├── HLS_S30_srf.csv
-  └── EMIT_metadata.csv
+  └── Kings_Canyon_EMIT/
+
+# Metadata CSVs are embedded in the repository by default:
+src/HLS_L30_srf.csv
+src/HLS_S30_srf.csv
+src/EMIT_metadata.csv
 ```
 
 ## See Also

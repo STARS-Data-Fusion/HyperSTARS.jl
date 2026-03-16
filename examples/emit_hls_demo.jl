@@ -81,8 +81,9 @@ hls_l30_datp = permutedims(hls_l30_dat, (1,2,4,3));
 hls_l30_raster = Raster(hls_l30_datp, dims=(X(xdim), Y(ydim), Band(["Coastal Aerosal","Blue","Green","Red","NIR","SWIR1","SWIR2"]),Ti(times)))
 
 ###### spectral response functions for landsat (L30) and sentinel (S30)
-HLS_L30_srf, srf_names_l30 = readdlm("HLS_L30_srf.csv", ',', header=true)
-HLS_S30_srf, srf_names_s30 = readdlm("HLS_S30_srf.csv", ',', header=true)
+metadata_dir = joinpath(pkgdir(HyperSTARS), "src")
+HLS_L30_srf, srf_names_l30 = readdlm(joinpath(metadata_dir, "HLS_L30_srf.csv"), ',', header=true)
+HLS_S30_srf, srf_names_s30 = readdlm(joinpath(metadata_dir, "HLS_S30_srf.csv"), ',', header=true)
 
 ## HLS uses the landsat srf for matching bands (all but red edge)
 HLS_S30_srf[HLS_S30_srf[:,1] .∈ Ref(HLS_L30_srf[:,1]),[2,3,4,5,10,13,14]] .= HLS_L30_srf[:,[2,3,4,5,6,8,9]]

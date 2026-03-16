@@ -76,10 +76,16 @@ Ensure your data is accessible from compute nodes:
 # Data should be at:
 ~/data/Kings_Canyon_HLS/
 ~/data/Kings_Canyon_EMIT/
-~/data/HLS_L30_srf.csv
-~/data/HLS_S30_srf.csv
-~/data/EMIT_metadata.csv
 ```
+
+Metadata CSVs are embedded in the repository under `src/` by default:
+```bash
+src/HLS_L30_srf.csv
+src/HLS_S30_srf.csv
+src/EMIT_metadata.csv
+```
+
+Only set `HYPERSTARS_METADATA_DIR` if you need to override the embedded defaults.
 
 Or update the `dir_path` variable in the Julia scripts to match your data location.
 
@@ -205,8 +211,10 @@ Check: module avail julia
 
 ### Data Not Found
 ```
-Solution: Verify data paths are accessible from compute nodes
-Check: srun --jobid=JOBID ls ~/data/
+Solution: Verify HLS/EMIT data paths are accessible from compute nodes
+Check: srun --jobid=JOBID ls ~/data/Kings_Canyon_HLS
+Check: srun --jobid=JOBID ls ~/data/Kings_Canyon_EMIT
+Metadata default: $SLURM_SUBMIT_DIR/src
 ```
 
 ## Output Files

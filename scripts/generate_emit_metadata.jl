@@ -47,21 +47,14 @@ emit_metadata[:, 3] .= 7.3
 header = ["Wavelength_nm", "GoodWavelength", "FWHM_nm"]
 
 # Write to file
-# Auto-detect environment and use appropriate path
+# Default to embedded package metadata directory; allow override
+default_data_dir = normpath(joinpath(@__DIR__, "..", "src"))
 if haskey(ENV, "HYPERSTARS_METADATA_DIR")
     data_dir = ENV["HYPERSTARS_METADATA_DIR"]
-    println("Using data directory from HYPERSTARS_METADATA_DIR: $data_dir")
-elseif haskey(ENV, "HYPERSTARS_DATA_DIR")
-    data_dir = ENV["HYPERSTARS_DATA_DIR"]
-    println("Using data directory from HYPERSTARS_DATA_DIR: $data_dir")
-elseif isdir("/gpfs/scratch/refl-datafusion-trtd/")
-    # HPC environment (fallback)
-    data_dir = "/gpfs/scratch/refl-datafusion-trtd"
-    println("Using HPC data directory: $data_dir")
+    println("Using metadata directory from HYPERSTARS_METADATA_DIR: $data_dir")
 else
-    # Local environment
-    data_dir = expanduser("~/data")
-    println("Using local data directory: $data_dir")
+    data_dir = default_data_dir
+    println("Using default embedded metadata directory: $data_dir")
 end
 
 mkpath(data_dir)

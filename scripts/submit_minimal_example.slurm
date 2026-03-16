@@ -49,7 +49,7 @@ echo ""
 
 # Generate required CSV files if they don't exist
 DATA_DIR="/gpfs/scratch/refl-datafusion-trtd"
-META_DIR="/gpfs/scratch/refl-datafusion-trtd/$USER/hyperstars_metadata"
+META_DIR="${HYPERSTARS_METADATA_DIR:-$SLURM_SUBMIT_DIR/src}"
 export HYPERSTARS_DATA_DIR="$DATA_DIR"
 export HYPERSTARS_METADATA_DIR="$META_DIR"
 mkdir -p "$META_DIR"
