@@ -13,6 +13,7 @@ using LinearAlgebra
 using Plots
 using Glob
 using Missings
+using Logging
 using HyperSTARS ## Pkg.add("https://github.com/STARS-Data-Fusion/HyperSTARS.jl") 
 
 # Rasters.checkmem!(false)
@@ -21,33 +22,94 @@ addprocs(Sys.CPU_THREADS - 1) ## workers (using Distributed package), Check how 
 
 @everywhere using HyperSTARS
 
+global_logger(ConsoleLogger(stdout, Logging.Info))
+@info "Initialized logging and worker pool" workers=nworkers() cpu_threads=Sys.CPU_THREADS
+
+function log_array_summary(label::AbstractString, arr)
+    total_count = length(arr)
+    finite_mask = isfinite.(arr)
+    finite_count = count(finite_mask)
+    nan_count = count(isnan, arr)
+    inf_count = count(isinf, arr)
+
+    if finite_count == 0
+        @warn "Array summary (no finite values)" label=label size=size(arr) total_count=total_count finite_count=finite_count nan_count=nan_count inf_count=inf_count
+        return
+    end
+
+    finite_vals = arr[finite_mask]
+    mn = minimum(finite_vals)
+    mx = maximum(finite_vals)
+    mean_val = mean(finite_vals)
+    std_val = std(finite_vals)
+    p01 = quantile(finite_vals, 0.01)
+    p50 = quantile(finite_vals, 0.50)
+    p99 = quantile(finite_vals, 0.99)
+
+    @info "Array summary" label=label size=size(arr) total_count=total_count finite_count=finite_count finite_fraction=(finite_count / total_count) nan_count=nan_count inf_count=inf_count min=mn max=mx mean=mean_val std=std_val p01=p01 p50=p50 p99=p99
+end
+
+function log_file_date_list(label::AbstractString, files::Vector{String}, dates::Vector{Date})
+    nd = min(length(files), length(dates))
+    if nd == 0
+        @info "No dated files to list" label=label
+        return
+    end
+
+    file_date_pairs = collect(zip(dates[1:nd], files[1:nd]))
+    sort!(file_date_pairs, by=x -> x[1])
+    listing = ["$(Dates.format(d, "yyyy-mm-dd")) => $(f)" for (d, f) in file_date_pairs]
+    @info "File/date list" label=label count=length(listing) entries=listing
+end
+
 ######### Wrapper functions to reduce memory and compiling time
 function get_hls_data(dir, bands, date_range)
+    @info "Loading HLS data" directory=dir bands=bands date_range=date_range
     raster_list = []
     time_dates = nothing
     band_arrays_list = []
     ref_raster = nothing
     
     for band in bands 
+        band_dir = joinpath(dir, band)
+        @info "Searching HLS band directory" band=band directory=band_dir
         band_files = glob("*$(band)*.tif", joinpath(dir,band)) ## find all tif files in band subdirectory
+        if isempty(band_files)
+            @warn "No files found for band $band in $dir"
+            continue
+        end
+        @info "Found HLS files" band=band nfiles=length(band_files)
         band_dates = [Date(match(r"\d{8}", f).match, "yyyymmdd") for f in band_files] ## extract dates from tif filenames
+        log_file_date_list("HLS available ($(band))", band_files, band_dates)
         kp_dates = date_range[1] .<= band_dates .<= date_range[2] ## find all available dates within target date range
+        @info "Filtered HLS files by date" band=band selected_files=count(kp_dates) date_start=date_range[1] date_end=date_range[2]
+        log_file_date_list("HLS selected ($(band))", band_files[kp_dates], band_dates[kp_dates])
         band_rasters = [Raster(x, lazy=true) for x in band_files[kp_dates]] ## read geotiffs for all dates found in date range, using lazy loading
-        if ref_raster === nothing && !isempty(band_rasters)
+        if isempty(band_rasters)
+            @warn "No rasters found for band $band in specified date range"
+            continue
+        end
+        if ref_raster === nothing
             ref_raster = band_rasters[1]
         end
         if time_dates === nothing
             time_dates = band_dates[kp_dates]
         end
         # Convert rasters to arrays
+        @info "Reading HLS rasters into arrays" band=band nrasters=length(band_rasters)
         band_arrays = [Array(r) for r in band_rasters]
         push!(band_arrays_list, band_arrays)
     end ## loop over all bands
+
+    if isempty(band_arrays_list)
+        error("No valid HLS raster data found in $dir for date range $(date_range[1]) to $(date_range[2]).")
+    end
 
     # Get dimensions from first raster
     ny, nx = size(band_arrays_list[1][1])
     ntime = length(time_dates)
     nbands = length(findall(x -> !isempty(x), band_arrays_list))  # Only count non-empty bands
+    @info "Constructing HLS data cube" ny=ny nx=nx nbands=nbands ntime=ntime
     
     # Create output array
     hls_array = zeros(Float32, ny, nx, nbands, ntime)
@@ -64,26 +126,35 @@ function get_hls_data(dir, bands, date_range)
     end
     
     # Keep y,x,band,time order to match expected data layout (nx x ny x nw x T)
+    @info "Completed HLS load" directory=dir output_size=size(hls_array)
+    log_array_summary("HLS cube: $(basename(normpath(dir)))", hls_array)
     return hls_array, time_dates, ref_raster
 end
 
 #### loading EMIT data from EMIT directory
 function get_emit(dir_path, emit_dir, date_range)
+    @info "Loading EMIT metadata" path=joinpath(dir_path,"EMIT_metadata.csv")
     emit_metadata, _ = readdlm(joinpath(dir_path,"EMIT_metadata.csv"), ',', header=true)
     wavelengths = emit_metadata[emit_metadata[:,2].==1,1]
     fwhm = emit_metadata[emit_metadata[:,2].==1,3]
     good_wavelengths = emit_metadata[:,2]
     good_wavelength_inds = findall(good_wavelengths .== 1)
 
+    @info "Searching EMIT directory" directory=emit_dir
     emit_files = glob("*.tif", emit_dir)
+    @info "Found EMIT files" nfiles=length(emit_files)
     emit_dates = [Date(match(r"\d{8}", f).match, "yyyymmdd") for f in emit_files] ## extract dates from tif filenames
+    log_file_date_list("EMIT available", emit_files, emit_dates)
     kp_dates = date_range[1] .<= emit_dates .<= date_range[2] ## find all available dates within target date range
+    @info "Filtered EMIT files by date" selected_files=count(kp_dates) date_start=date_range[1] date_end=date_range[2]
+    log_file_date_list("EMIT selected", emit_files[kp_dates], emit_dates[kp_dates])
 
     # Use lazy=true to avoid loading entire large files into memory
     emit_rasters = [Raster(x, lazy=true)[:,:,good_wavelength_inds] for x in emit_files[kp_dates]] # read emit rasters for dates in range, only keep good wavelengths
     ref_raster = isempty(emit_rasters) ? nothing : emit_rasters[1]
 
     # Convert rasters to arrays
+    @info "Reading EMIT rasters into arrays" nrasters=length(emit_rasters)
     emit_arrays = [Array(r) for r in emit_rasters]
     
     if !isempty(emit_arrays)
@@ -105,6 +176,8 @@ function get_emit(dir_path, emit_dir, date_range)
     end
 
     emit_array[.!isfinite.(emit_array) .| (emit_array .== -9999)] .= NaN ## replace missings and -9999 with nans
+    @info "Completed EMIT load" output_size=size(emit_array)
+    log_array_summary("EMIT cube", emit_array)
     return emit_array, emit_dates[kp_dates], fwhm, wavelengths, ref_raster
 end
 
@@ -112,6 +185,7 @@ end
 function get_srf(dir_path)
     l30_srf_path = joinpath(dir_path, "HLS_L30_srf.csv")
     s30_srf_path = joinpath(dir_path, "HLS_S30_srf.csv")
+    @info "Loading SRF files" l30_path=l30_srf_path s30_path=s30_srf_path
     
     if !isfile(l30_srf_path)
         error("HLS_L30_srf.csv not found at $(l30_srf_path). " *
@@ -124,6 +198,7 @@ function get_srf(dir_path)
     
     HLS_L30_srf, _ = readdlm(l30_srf_path, ',', header=true)
     HLS_S30_srf, _ = readdlm(s30_srf_path, ',', header=true)
+    @info "Read SRF matrices" l30_size=size(HLS_L30_srf) s30_size=size(HLS_S30_srf)
 
     ## HLS uses the landsat srf for matching bands (all but red edge)
     HLS_S30_srf[HLS_S30_srf[:,1] .∈ Ref(HLS_L30_srf[:,1]),[2,3,4,5,10,13,14]] .= HLS_L30_srf[:,[2,3,4,5,6,8,9]]
@@ -140,15 +215,24 @@ function get_srf(dir_path)
 
     S30_srf = Dict(:w => HLS_S30_srf2[:,1], :rsr => HLS_S30_srf2[:,[2:10...,13,14]]')
     L30_srf = Dict(:w => HLS_L30_srf2[:,1], :rsr => HLS_L30_srf2[:,[2:6...,8,9]]')
+    @info "Prepared SRF dictionaries" l30_waves=length(hls_l30_waves) s30_waves=length(hls_s30_waves)
     return S30_srf, L30_srf, hls_l30_waves, hls_s30_waves
 end
 
 #### process EMIT and HLS, return data and geodata structs for fusion model
 function get_data(dir_path, date_range)
+    @info "Preparing data inputs" base_directory=dir_path date_range=date_range
     #### product directory
     hls_l30_dir = joinpath(dir_path,"Kings_Canyon_HLS/L30/")
     hls_s30_dir = joinpath(dir_path,"Kings_Canyon_HLS/S30/")
     emit_dir = joinpath(dir_path,"Kings_Canyon_EMIT")
+
+    for required_dir in [hls_l30_dir, hls_s30_dir, emit_dir]
+        @info "Checking required directory" directory=required_dir
+        if !isdir(required_dir)
+            error("Required data directory not found: $required_dir")
+        end
+    end
 
     #### loading HLS data from tif
     hls_l30_bands = ["coastal_aerosol", "blue", "green", "red", "NIR", "SWIR1", "SWIR2"]
@@ -157,10 +241,25 @@ function get_data(dir_path, date_range)
     ## load and combine all L30 and S30 data into x,y,band,time raster
     hls_l30_raster, hls_l30_dates, hls_l30_ref = get_hls_data(hls_l30_dir, hls_l30_bands, date_range)
     hls_s30_raster, hls_s30_dates, hls_s30_ref = get_hls_data(hls_s30_dir, hls_s30_bands, date_range)
+    @info "Loaded HLS products" l30_size=size(hls_l30_raster) s30_size=size(hls_s30_raster)
 
     S30_srf, L30_srf, hls_l30_waves, hls_s30_waves = get_srf(dir_path)
 
     emit_raster, emit_dates, fwhm_emit, emit_waves, emit_ref = get_emit(dir_path, emit_dir, date_range)
+    @info "Loaded EMIT product" emit_size=size(emit_raster)
+
+    if isempty(hls_l30_dates)
+        error("No L30 HLS observations found for date range $(date_range[1]) to $(date_range[2]) in $hls_l30_dir")
+    end
+    if isempty(hls_s30_dates)
+        error("No S30 HLS observations found for date range $(date_range[1]) to $(date_range[2]) in $hls_s30_dir")
+    end
+    if isempty(emit_dates)
+        error("No EMIT observations found for date range $(date_range[1]) to $(date_range[2]) in $emit_dir")
+    end
+    if emit_ref === nothing || hls_s30_ref === nothing || hls_l30_ref === nothing
+        error("Missing reference raster(s); verify HLS/EMIT files exist and match the requested date range.")
+    end
 
     ###### Fusion setup
     emit_origin = get_centroid_origin_raster(emit_ref)
@@ -177,6 +276,7 @@ function get_data(dir_path, date_range)
 
     ## sequence of dates from start/end observed
     all_dates = minimum([emit_dates..., hls_l30_dates..., hls_s30_dates...]):maximum([emit_dates..., hls_l30_dates..., hls_s30_dates...])
+    @info "Built unified timeline" start_date=first(all_dates) end_date=last(all_dates) ndates=length(all_dates)
 
     ## convert to t=1:T times
     emit_times = findall(all_dates .∈ Ref(emit_dates))
@@ -187,6 +287,10 @@ function get_data(dir_path, date_range)
     hls_l30_array = disallowmissing(hls_l30_raster);
     hls_s30_array = disallowmissing(hls_s30_raster);
     emit_array = disallowmissing(emit_raster);
+
+    log_array_summary("Input array HLS L30", hls_l30_array)
+    log_array_summary("Input array HLS S30", hls_s30_array)
+    log_array_summary("Input array EMIT", emit_array)
 
     ### create geospatial structs for each instrument
     # 4th element is spatial "fidelity": 0 for highest (target) spatial res, 1 for high but not target, 2 for coarse res (like PACE)
@@ -204,13 +308,16 @@ function get_data(dir_path, date_range)
 
     ## vector of InstrumentData for all instruments, order must match inst30m_geodata order!
     data30m_list = [emit_data, hls_l30_data, hls_s30_data];
+    @info "Prepared instrument data structures" ninstruments=length(data30m_list)
     return data30m_list, inst30m_geodata, all_dates
 end 
 
 #### run pca, return basis information
 function get_pca(data30m_list)
+    @info "Starting PCA fit from EMIT data"
     ##### Estimate PCA basis from available EMIT
     n1,n2,n3,n4 = size(data30m_list[1].data)
+    @info "EMIT cube dimensions for PCA" ny=n1 nx=n2 nwaves=n3 ntime=n4
 
     ### get basis functions using EMIT (PCA) 
     emit_rt = reshape(permutedims(data30m_list[1].data, (1,2,4,3)),(n1*n2*n4,n3))'
@@ -222,6 +329,7 @@ function get_pca(data30m_list)
     B = projection(pca)
     vrs = principalvars(pca)
     scs = predict(pca, Xt)
+    @info "Completed PCA fit" ncomponents=size(B,2) explained_variance_sum=sum(vrs)
 
 
     # ## compute scores
@@ -237,17 +345,54 @@ function get_pca(data30m_list)
     return B, mm, sx, vrs
 end
 
+function first_tif_file(dir::String)
+    @info "Searching for first TIFF" directory=dir
+    for (root, _, files) in walkdir(dir)
+        for f in files
+            if endswith(lowercase(f), ".tif")
+                @info "Found TIFF file" file=joinpath(root, f)
+                return joinpath(root, f)
+            end
+        end
+    end
+    error("No .tif files found in $dir")
+end
+
+function write_multiband_geotiff(path::String, data::AbstractArray{<:Real,3}, origin::Vector{<:Real}, cell_size::Vector{<:Real}, proj_wkt::AbstractString)
+    ny, nx, nbands = size(data)
+    @info "Writing multi-band GeoTIFF" path=path ny=ny nx=nx nbands=nbands
+    data32 = Float32.(data)
+    x0 = Float64(origin[1] - 0.5 * cell_size[1])
+    y0 = Float64(origin[2] - 0.5 * cell_size[2])
+    dx = Float64(cell_size[1])
+    dy = Float64(cell_size[2])
+    geotransform = [x0, dx, 0.0, y0, 0.0, dy]
+
+    ArchGDAL.create(path; driver=ArchGDAL.getdriver("GTiff"), width=nx, height=ny, nbands=nbands, dtype=Float32, options=["COMPRESS=LZW"]) do ds
+        ArchGDAL.setgeotransform!(ds, geotransform)
+        if !isempty(proj_wkt)
+            ArchGDAL.setproj!(ds, proj_wkt)
+        end
+        for bi in 1:nbands
+            ArchGDAL.write!(ds, data32[:,:,bi], bi)
+        end
+    end
+end
+
 
 
 
 #### Target fusion date range
-date_range = [Date("2022-08-01"), Date("2022-08-31")]
+date_range = [Date("2024-03-25"), Date("2024-07-27")]
+@info "Configured target date range" start_date=date_range[1] end_date=date_range[2]
 
 #### parent directory
 # dir_path = "/Users/maggiej/Documents/Hyperspectral_DataFusion/Data/KingsCanyon/"
-dir_path = "/gpfs/scratch/refl-datafusion-trtd/"
+dir_path = expanduser("~/data/")
+@info "Using base data directory" directory=dir_path
 
 data30m_list, inst30m_geodata, all_dates = get_data(dir_path, date_range)
+@info "Loaded all input datasets" all_dates_count=length(all_dates)
 
 ## pull landsat and emit spatial information for target resolution grids
 hls_l30_origin = inst30m_geodata[2].origin
@@ -267,6 +412,7 @@ target30m_geodata = InstrumentGeoData(hls_l30_origin, hls_l30_csize, target_ndim
 
 ##### Estimate PCA basis from available EMIT
 B, mm, sx, vrs = get_pca(data30m_list)
+@info "PCA basis ready" basis_size=size(B)
 
 ##### Set up priors
 Bs = B .* sx[:] # rescale pc basis 
@@ -284,6 +430,9 @@ end
 @everywhere using LinearAlgebra
 @everywhere BLAS.set_num_threads(1)
 
+target_times = 1:2
+@info "Starting scene fusion" target_times=collect(target_times) nsamp=50 window_buffer=4
+
 @time fused_images, fused_sd_images = scene_fusion_pmap(data30m_list,
             inst30m_geodata,
             window30m_geodata,
@@ -295,7 +444,7 @@ end
             model_pars; 
             nsamp=50,
             window_buffer = 4,
-            target_times = 1:2, 
+            target_times = target_times, 
             smooth = false,           
             spatial_mod = exp_corD,                                           
             obs_operator = unif_weighted_obs_operator_centroid,
@@ -304,5 +453,34 @@ end
             tscov_pars = sqrt.(vrs) ./ 10.0, 
             ar_phi=1.0,
             window_radius=100.0);
+@info "Scene fusion complete" fused_size=size(fused_images) fused_sd_size=size(fused_sd_images)
+log_array_summary("Fused mean (all target times)", fused_images)
+log_array_summary("Fused sd (all target times)", fused_sd_images)
 
-# fused_images and fused_sd_images are y,x,wavelength,time arrays, need to write to raster or .nc as desired            
+# Write fused outputs as one multi-band GeoTIFF per day (mean + sd)
+output_dir = expanduser("~/data/EMIT-HLS-fusion-output")
+mkpath(output_dir)
+@info "Ensured output directory exists" output_directory=output_dir
+
+sample_tif = first_tif_file(joinpath(dir_path, "Kings_Canyon_HLS/L30"))
+proj_wkt = ArchGDAL.read(sample_tif) do ds
+    ArchGDAL.getproj(ds)
+end
+@info "Read projection from sample TIFF" sample_tif=sample_tif
+
+for (out_ti, global_ti) in enumerate(target_times)
+    date_str = Dates.format(all_dates[global_ti], "yyyymmdd")
+
+    mean_path = joinpath(output_dir, "fused_mean_$(date_str).tif")
+    sd_path = joinpath(output_dir, "fused_sd_$(date_str).tif")
+    @info "Writing fused outputs for date" date=date_str mean_path=mean_path sd_path=sd_path
+
+    log_array_summary("Fused mean (date=$(date_str))", fused_images[:,:,:,out_ti])
+    log_array_summary("Fused sd (date=$(date_str))", fused_sd_images[:,:,:,out_ti])
+
+    write_multiband_geotiff(mean_path, fused_images[:,:,:,out_ti], hls_l30_origin, hls_l30_csize, proj_wkt)
+    write_multiband_geotiff(sd_path, fused_sd_images[:,:,:,out_ti], hls_l30_origin, hls_l30_csize, proj_wkt)
+end
+
+@info "Finished writing all fused outputs" output_directory=output_dir
+println("Wrote fused GeoTIFF outputs to: $output_dir")
