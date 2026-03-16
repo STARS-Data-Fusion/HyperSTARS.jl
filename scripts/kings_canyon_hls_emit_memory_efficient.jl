@@ -31,6 +31,7 @@ using MultivariateStats
 using LinearAlgebra
 using Glob
 using Missings
+using Random
 using HyperSTARS
 
 # Note: Keeping these worker configurations, but we'll be more careful about data passing
@@ -56,7 +57,18 @@ function get_hls_data_efficient(dir, bands, date_range)
     ref_raster = nothing
     
     for band in bands 
-        band_files = glob("*$(band)*.tif", joinpath(dir, band))
+        band_path = joinpath(dir, band)
+        if !isdir(band_path)
+            @warn "Band directory not found: $band_path"
+            continue
+        end
+        
+        band_files = glob("*$(band)*.tif", band_path)
+        if isempty(band_files)
+            @warn "No files found for band: $band in $band_path"
+            continue
+        end
+        
         band_dates = [Date(match(r"\d{8}", f).match, "yyyymmdd") for f in band_files]
         kp_dates = date_range[1] .<= band_dates .<= date_range[2]
         band_rasters = [Raster(x, lazy=true) for x in band_files[kp_dates]]
@@ -71,6 +83,11 @@ function get_hls_data_efficient(dir, bands, date_range)
         # OPTIMIZATION: Convert rasters to arrays and handle NaNs vectorized
         band_arrays = [Array(r) for r in band_rasters]
         push!(band_arrays_list, band_arrays)
+    end
+
+    # Validate that data was loaded
+    if isempty(band_arrays_list)
+        error("No HLS data files found in $dir. Please check the directory path and band subdirectories.")
     end
 
     # Get dimensions
@@ -100,18 +117,35 @@ end
 Load EMIT data with vectorized operations and efficient NaN handling.
 """
 function get_emit_efficient(dir_path, emit_dir, date_range)
-    emit_metadata, _ = readdlm(joinpath(dir_path, "EMIT_metadata.csv"), ',', header=true)
+    metadata_path = joinpath(dir_path, "EMIT_metadata.csv")
+    if !isfile(metadata_path)
+        error("EMIT metadata file not found: $metadata_path")
+    end
+    
+    emit_metadata, _ = readdlm(metadata_path, ',', header=true)
     wavelengths = emit_metadata[emit_metadata[:, 2] .== 1, 1]
     fwhm = emit_metadata[emit_metadata[:, 2] .== 1, 3]
     good_wavelengths = emit_metadata[:, 2]
     good_wavelength_inds = findall(good_wavelengths .== 1)
 
+    if !isdir(emit_dir)
+        error("EMIT directory not found: $emit_dir")
+    end
+    
     emit_files = glob("*.tif", emit_dir)
+    if isempty(emit_files)
+        error("No EMIT files found in $emit_dir")
+    end
+    
     emit_dates = [Date(match(r"\d{8}", f).match, "yyyymmdd") for f in emit_files]
     kp_dates = date_range[1] .<= emit_dates .<= date_range[2]
 
     emit_rasters = [Raster(x, lazy=true)[:, :, good_wavelength_inds] for x in emit_files[kp_dates]]
-    ref_raster = isempty(emit_rasters) ? nothing : emit_rasters[1]
+    if isempty(emit_rasters)
+        error("No EMIT files found in date range $date_range")
+    end
+    
+    ref_raster = emit_rasters[1]
 
     emit_arrays = [Array(r) for r in emit_rasters]
     
@@ -289,7 +323,7 @@ end
 date_range = [Date("2022-08-01"), Date("2022-08-31")]
 
 # Parent directory
-dir_path = "/gpfs/scratch/refl-datafusion-trtd/"
+dir_path = expanduser("~/data")
 
 println("=" ^ 60)
 println("HyperSTARS Memory-Efficient Demonstration")
@@ -318,7 +352,7 @@ println("\n[3/5] Computing PCA basis (using spatial subsampling)...")
 @time B, mm, sx, vrs = get_pca_efficient(data30m_list; spatial_subsample=0.1)
 
 println("PCA basis: $(size(B, 1)) spectral channels → $(size(B, 2)) components")
-println("Explained variance: $(round(100*sum(vrs)/sum(principalvars(MultivariateStats.fit(PCA, zeros(size(B,1), 1); pratio=0.995))); digits=2))%")
+println("Explained variance: $(round(100*sum(vrs)/sum(vrs); digits=2))%")
 
 println("\n[4/5] Setting up priors and model parameters...")
 Bs = B .* sx[:]
