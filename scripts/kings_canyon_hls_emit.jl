@@ -31,24 +31,64 @@ global_logger(ConsoleLogger(stdout, Logging.Info))
 
 function log_array_summary(label::AbstractString, arr)
     total_count = length(arr)
-    finite_mask = isfinite.(arr)
-    finite_count = count(finite_mask)
-    nan_count = count(isnan, arr)
-    inf_count = count(isinf, arr)
+    finite_count = 0
+    nan_count = 0
+    inf_count = 0
+
+    mn = Inf
+    mx = -Inf
+    mean_val = 0.0
+    m2 = 0.0
+
+    quantile_sample_limit = 250_000
+    sample_step = max(1, cld(total_count, quantile_sample_limit))
+    finite_sample = Float64[]
+    sizehint!(finite_sample, min(total_count, quantile_sample_limit))
+
+    idx = 0
+    for v in arr
+        idx += 1
+        if isfinite(v)
+            fv = Float64(v)
+            finite_count += 1
+
+            mn = min(mn, fv)
+            mx = max(mx, fv)
+
+            delta = fv - mean_val
+            mean_val += delta / finite_count
+            delta2 = fv - mean_val
+            m2 += delta * delta2
+
+            if idx % sample_step == 0
+                push!(finite_sample, fv)
+            end
+        else
+            if isnan(v)
+                nan_count += 1
+            elseif isinf(v)
+                inf_count += 1
+            else
+                inf_count += 1
+            end
+        end
+    end
 
     if finite_count == 0
         @warn "Array summary (no finite values)" label=label size=size(arr) total_count=total_count finite_count=finite_count nan_count=nan_count inf_count=inf_count
         return
     end
 
-    finite_vals = arr[finite_mask]
-    mn = minimum(finite_vals)
-    mx = maximum(finite_vals)
-    mean_val = mean(finite_vals)
-    std_val = std(finite_vals)
-    p01 = quantile(finite_vals, 0.01)
-    p50 = quantile(finite_vals, 0.50)
-    p99 = quantile(finite_vals, 0.99)
+    std_val = finite_count > 1 ? sqrt(m2 / (finite_count - 1)) : 0.0
+    if isempty(finite_sample)
+        p01 = mn
+        p50 = mean_val
+        p99 = mx
+    else
+        p01 = quantile(finite_sample, 0.01)
+        p50 = quantile(finite_sample, 0.50)
+        p99 = quantile(finite_sample, 0.99)
+    end
 
     @info "Array summary" label=label size=size(arr) total_count=total_count finite_count=finite_count finite_fraction=(finite_count / total_count) nan_count=nan_count inf_count=inf_count min=mn max=mx mean=mean_val std=std_val p01=p01 p50=p50 p99=p99
 end
@@ -365,7 +405,6 @@ end
 function write_multiband_geotiff(path::String, data::AbstractArray{<:Real,3}, origin::Vector{<:Real}, cell_size::Vector{<:Real}, proj_wkt::AbstractString)
     ny, nx, nbands = size(data)
     @info "Writing multi-band GeoTIFF" path=path ny=ny nx=nx nbands=nbands
-    data32 = Float32.(data)
     x0 = Float64(origin[1] - 0.5 * cell_size[1])
     y0 = Float64(origin[2] - 0.5 * cell_size[2])
     dx = Float64(cell_size[1])
@@ -378,7 +417,7 @@ function write_multiband_geotiff(path::String, data::AbstractArray{<:Real,3}, or
             ArchGDAL.setproj!(ds, proj_wkt)
         end
         for bi in 1:nbands
-            ArchGDAL.write!(ds, data32[:,:,bi], bi)
+            ArchGDAL.write!(ds, Float32.(view(data, :, :, bi)), bi)
         end
     end
 end
@@ -437,31 +476,11 @@ end
 @everywhere BLAS.set_num_threads(1)
 
 target_times = eachindex(all_dates)
-@info "Starting scene fusion" target_times=collect(target_times) nsamp=50 window_buffer=4
-
-@time fused_images, fused_sd_images = scene_fusion_pmap(data30m_list,
-            inst30m_geodata,
-            window30m_geodata,
-            target30m_geodata,
-            float.(mm), ## spectral mean
-            pmean, ## mean-zero prior mean
-            pvar, ## diagonal prior var
-            Bs, ## spectral basis function matrix
-            model_pars; 
-            nsamp=50,
-            window_buffer = 4,
-            target_times = target_times, 
-            smooth = false,           
-            spatial_mod = exp_corD,                                           
-            obs_operator = unif_weighted_obs_operator_centroid,
-            state_in_cov=true,
-            cov_wt=0.2,
-            tscov_pars = sqrt.(vrs) ./ 10.0, 
-            ar_phi=1.0,
-            window_radius=100.0);
-@info "Scene fusion complete" fused_size=size(fused_images) fused_sd_size=size(fused_sd_images)
-log_array_summary("Fused mean (all target times)", fused_images)
-log_array_summary("Fused sd (all target times)", fused_sd_images)
+target_times = collect(target_times)
+target_batch_days = max(1, parse(Int, get(ENV, "HYPERSTARS_TARGET_BATCH_DAYS", "4")))
+overwrite_outputs = lowercase(get(ENV, "HYPERSTARS_OVERWRITE_OUTPUTS", "false")) in ("1", "true", "yes")
+log_per_date_summary = lowercase(get(ENV, "HYPERSTARS_LOG_PER_DATE_SUMMARY", "false")) in ("1", "true", "yes")
+@info "Starting scene fusion" target_times=target_times nsamp=50 window_buffer=4 target_batch_days=target_batch_days overwrite_outputs=overwrite_outputs log_per_date_summary=log_per_date_summary
 
 # Write fused outputs as one multi-band GeoTIFF per day (mean + sd)
 output_dir = expanduser("~/data/EMIT-HLS-fusion-output")
@@ -474,18 +493,59 @@ proj_wkt = ArchGDAL.read(sample_tif) do ds
 end
 @info "Read projection from sample TIFF" sample_tif=sample_tif
 
-for (out_ti, global_ti) in enumerate(target_times)
-    date_str = Dates.format(all_dates[global_ti], "yyyymmdd")
+for chunk_start in 1:target_batch_days:length(target_times)
+    chunk_end = min(length(target_times), chunk_start + target_batch_days - 1)
+    chunk_times = target_times[chunk_start:chunk_end]
+    @info "Running fusion chunk" chunk_start=chunk_start chunk_end=chunk_end ndates=length(chunk_times)
 
-    mean_path = joinpath(output_dir, "fused_mean_$(date_str).tif")
-    sd_path = joinpath(output_dir, "fused_sd_$(date_str).tif")
-    @info "Writing fused outputs for date" date=date_str mean_path=mean_path sd_path=sd_path
+    @time fused_images_chunk, fused_sd_images_chunk = scene_fusion_pmap(data30m_list,
+                inst30m_geodata,
+                window30m_geodata,
+                target30m_geodata,
+                float.(mm), ## spectral mean
+                pmean, ## mean-zero prior mean
+                pvar, ## diagonal prior var
+                Bs, ## spectral basis function matrix
+                model_pars;
+                nsamp=50,
+                window_buffer = 4,
+                target_times = chunk_times,
+                smooth = false,
+                spatial_mod = exp_corD,
+                obs_operator = unif_weighted_obs_operator_centroid,
+                state_in_cov=true,
+                cov_wt=0.2,
+                tscov_pars = sqrt.(vrs) ./ 10.0,
+                ar_phi=1.0,
+                window_radius=100.0)
 
-    log_array_summary("Fused mean (date=$(date_str))", fused_images[:,:,:,out_ti])
-    log_array_summary("Fused sd (date=$(date_str))", fused_sd_images[:,:,:,out_ti])
+    @info "Chunk fusion complete" fused_size=size(fused_images_chunk) fused_sd_size=size(fused_sd_images_chunk)
+    log_array_summary("Fused mean (chunk)", fused_images_chunk)
+    log_array_summary("Fused sd (chunk)", fused_sd_images_chunk)
 
-    write_multiband_geotiff(mean_path, fused_images[:,:,:,out_ti], hls_l30_origin, hls_l30_csize, proj_wkt)
-    write_multiband_geotiff(sd_path, fused_sd_images[:,:,:,out_ti], hls_l30_origin, hls_l30_csize, proj_wkt)
+    for (out_ti, global_ti) in enumerate(chunk_times)
+        date_str = Dates.format(all_dates[global_ti], "yyyymmdd")
+
+        mean_path = joinpath(output_dir, "fused_mean_$(date_str).tif")
+        sd_path = joinpath(output_dir, "fused_sd_$(date_str).tif")
+        if !overwrite_outputs && isfile(mean_path) && isfile(sd_path)
+            @info "Skipping existing fused outputs for date" date=date_str mean_path=mean_path sd_path=sd_path
+            continue
+        end
+
+        @info "Writing fused outputs for date" date=date_str mean_path=mean_path sd_path=sd_path
+        if log_per_date_summary
+            log_array_summary("Fused mean (date=$(date_str))", fused_images_chunk[:,:,:,out_ti])
+            log_array_summary("Fused sd (date=$(date_str))", fused_sd_images_chunk[:,:,:,out_ti])
+        end
+
+        write_multiband_geotiff(mean_path, fused_images_chunk[:,:,:,out_ti], hls_l30_origin, hls_l30_csize, proj_wkt)
+        write_multiband_geotiff(sd_path, fused_sd_images_chunk[:,:,:,out_ti], hls_l30_origin, hls_l30_csize, proj_wkt)
+    end
+
+    fused_images_chunk = nothing
+    fused_sd_images_chunk = nothing
+    GC.gc()
 end
 
 @info "Finished writing all fused outputs" output_directory=output_dir
