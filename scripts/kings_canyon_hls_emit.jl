@@ -23,6 +23,8 @@ addprocs(Sys.CPU_THREADS - 1) ## workers (using Distributed package), Check how 
 @everywhere using HyperSTARS
 
 const DEFAULT_METADATA_DIR = joinpath(pkgdir(HyperSTARS), "src")
+const TARGET_START_DATE = Date("2024-03-25")
+const TARGET_END_DATE = Date("2024-07-27")
 
 global_logger(ConsoleLogger(stdout, Logging.Info))
 @info "Initialized logging and worker pool" workers=nworkers() cpu_threads=Sys.CPU_THREADS
@@ -385,7 +387,7 @@ end
 
 
 #### Target fusion date range
-date_range = [Date("2024-03-25"), Date("2024-07-27")]
+date_range = [TARGET_START_DATE, TARGET_END_DATE]
 @info "Configured target date range" start_date=date_range[1] end_date=date_range[2]
 
 #### parent directory
@@ -434,7 +436,7 @@ end
 @everywhere using LinearAlgebra
 @everywhere BLAS.set_num_threads(1)
 
-target_times = 1:2
+target_times = eachindex(all_dates)
 @info "Starting scene fusion" target_times=collect(target_times) nsamp=50 window_buffer=4
 
 @time fused_images, fused_sd_images = scene_fusion_pmap(data30m_list,

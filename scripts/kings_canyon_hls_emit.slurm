@@ -1,23 +1,23 @@
 #!/bin/bash
-#SBATCH --job-name=hyperstars_minimal
-#SBATCH --mem=32G
-#SBATCH --time=1:30:00
-#SBATCH --cpus-per-task=8
+#SBATCH --job-name=hyperstars_full
+#SBATCH --mem=80G
+#SBATCH --time=4:00:00
+#SBATCH --cpus-per-task=16
 #SBATCH --nodes=1
-#SBATCH --output=hyperstars_minimal_%j.out
-#SBATCH --error=hyperstars_minimal_%j.err
+#SBATCH --output=hyperstars_full_%j.out
+#SBATCH --error=hyperstars_full_%j.err
 
-# HyperSTARS Minimal Example Job Script
-# Based on empirical measurements:
-#   - Peak memory: 21 GB (requesting 32 GB for safety)
-#   - Runtime: 49 minutes (requesting 90 minutes)
-#   - Workers: 4 (requesting 8 CPUs)
+# HyperSTARS Full Production Job Script
+# Based on extrapolated measurements:
+#   - Expected peak memory: ~60 GB (requesting 80 GB for safety)
+#   - Expected runtime: ~3 hours (requesting 4 hours)
+#   - Workers: configurable (requesting 16 CPUs)
 #
-# Configuration: 5 days (Aug 13-17, 2022), full 1411×2085 extent
-# Expected output: ~20 GB memory, ~50 minutes runtime
+# Configuration: 31 days (August 2022), full 1411×2085 extent
+# Note: Adjust memory/time based on your specific date range
 
 echo "=========================================="
-echo "HyperSTARS Minimal Example"
+echo "HyperSTARS Full Production Run"
 echo "=========================================="
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURM_NODELIST"
@@ -37,7 +37,7 @@ echo ""
 which julia
 julia --version
 
-# Set number of threads (optional, for threading within Julia)
+# Set number of threads (optional)
 export JULIA_NUM_THREADS=1
 
 # Change to project directory
@@ -65,11 +65,12 @@ else
 fi
 
 echo ""
-echo "Running minimal_example.jl..."
+echo "Running kings_canyon_hls_emit.jl..."
+echo "WARNING: This is the full 31-day production run"
 echo ""
 
 # Run the Julia script
-julia --project=. scripts/minimal_example.jl
+julia --project=. scripts/kings_canyon_hls_emit.jl
 
 EXIT_CODE=$?
 

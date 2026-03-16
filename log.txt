@@ -1,0 +1,596 @@
+┌ Info: Initialized logging and worker pool
+│   workers = 7
+└   cpu_threads = 8
+┌ Info: Configured target date range
+│   start_date = 2024-03-25
+└   end_date = 2024-07-27
+┌ Info: Using base data directory
+└   directory = "/Users/halverso/data/"
+┌ Info: Using metadata directory
+└   directory = "/Users/halverso/Projects/HyperSTARS.jl/src"
+┌ Info: Preparing data inputs
+│   base_directory = "/Users/halverso/data/"
+│   date_range =
+│    2-element Vector{Date}:
+└     ⋮
+┌ Info: Checking required directory
+└   directory = "/Users/halverso/data/Kings_Canyon_HLS/L30/"
+┌ Info: Checking required directory
+└   directory = "/Users/halverso/data/Kings_Canyon_HLS/S30/"
+┌ Info: Checking required directory
+└   directory = "/Users/halverso/data/Kings_Canyon_EMIT"
+┌ Info: Loading HLS data
+│   directory = "/Users/halverso/data/Kings_Canyon_HLS/L30/"
+│   bands = 7-element Vector{String}: …
+└   date_range = 2-element Vector{Date}: …
+┌ Info: Searching HLS band directory
+│   band = "coastal_aerosol"
+└   directory = "/Users/halverso/data/Kings_Canyon_HLS/L30/coastal_aerosol"
+┌ Info: Found HLS files
+│   band = "coastal_aerosol"
+└   nfiles = 45
+┌ Info: File/date list
+│   label = "HLS available (coastal_aerosol)"
+│   count = 45
+└   entries = 45-element Vector{String}: …
+┌ Info: Filtered HLS files by date
+│   band = "coastal_aerosol"
+│   selected_files = 29
+│   date_start = 2024-03-25
+└   date_end = 2024-07-27
+┌ Info: File/date list
+│   label = "HLS selected (coastal_aerosol)"
+│   count = 29
+└   entries = 29-element Vector{String}: …
+┌ Info: Reading HLS rasters into arrays
+│   band = "coastal_aerosol"
+└   nrasters = 29
+┌ Info: Searching HLS band directory
+│   band = "blue"
+└   directory = "/Users/halverso/data/Kings_Canyon_HLS/L30/blue"
+┌ Info: Found HLS files
+│   band = "blue"
+└   nfiles = 45
+┌ Info: File/date list
+│   label = "HLS available (blue)"
+│   count = 45
+└   entries = 45-element Vector{String}: …
+┌ Info: Filtered HLS files by date
+│   band = "blue"
+│   selected_files = 29
+│   date_start = 2024-03-25
+└   date_end = 2024-07-27
+┌ Info: File/date list
+│   label = "HLS selected (blue)"
+│   count = 29
+└   entries = 29-element Vector{String}: …
+┌ Info: Reading HLS rasters into arrays
+│   band = "blue"
+└   nrasters = 29
+┌ Info: Searching HLS band directory
+│   band = "green"
+└   directory = "/Users/halverso/data/Kings_Canyon_HLS/L30/green"
+┌ Info: Found HLS files
+│   band = "green"
+└   nfiles = 45
+┌ Info: File/date list
+│   label = "HLS available (green)"
+│   count = 45
+└   entries = 45-element Vector{String}: …
+┌ Info: Filtered HLS files by date
+│   band = "green"
+│   selected_files = 29
+│   date_start = 2024-03-25
+└   date_end = 2024-07-27
+┌ Info: File/date list
+│   label = "HLS selected (green)"
+│   count = 29
+└   entries = 29-element Vector{String}: …
+┌ Info: Reading HLS rasters into arrays
+│   band = "green"
+└   nrasters = 29
+┌ Info: Searching HLS band directory
+│   band = "red"
+└   directory = "/Users/halverso/data/Kings_Canyon_HLS/L30/red"
+┌ Info: Found HLS files
+│   band = "red"
+└   nfiles = 45
+┌ Info: File/date list
+│   label = "HLS available (red)"
+│   count = 45
+└   entries = 45-element Vector{String}: …
+┌ Info: Filtered HLS files by date
+│   band = "red"
+│   selected_files = 29
+│   date_start = 2024-03-25
+└   date_end = 2024-07-27
+┌ Info: File/date list
+│   label = "HLS selected (red)"
+│   count = 29
+└   entries = 29-element Vector{String}: …
+┌ Info: Reading HLS rasters into arrays
+│   band = "red"
+└   nrasters = 29
+┌ Info: Searching HLS band directory
+│   band = "NIR"
+└   directory = "/Users/halverso/data/Kings_Canyon_HLS/L30/NIR"
+┌ Info: Found HLS files
+│   band = "NIR"
+└   nfiles = 45
+┌ Info: File/date list
+│   label = "HLS available (NIR)"
+│   count = 45
+└   entries = 45-element Vector{String}: …
+┌ Info: Filtered HLS files by date
+│   band = "NIR"
+│   selected_files = 29
+│   date_start = 2024-03-25
+└   date_end = 2024-07-27
+┌ Info: File/date list
+│   label = "HLS selected (NIR)"
+│   count = 29
+└   entries = 29-element Vector{String}: …
+┌ Info: Reading HLS rasters into arrays
+│   band = "NIR"
+└   nrasters = 29
+┌ Info: Searching HLS band directory
+│   band = "SWIR1"
+└   directory = "/Users/halverso/data/Kings_Canyon_HLS/L30/SWIR1"
+┌ Info: Found HLS files
+│   band = "SWIR1"
+└   nfiles = 45
+┌ Info: File/date list
+│   label = "HLS available (SWIR1)"
+│   count = 45
+└   entries = 45-element Vector{String}: …
+┌ Info: Filtered HLS files by date
+│   band = "SWIR1"
+│   selected_files = 29
+│   date_start = 2024-03-25
+└   date_end = 2024-07-27
+┌ Info: File/date list
+│   label = "HLS selected (SWIR1)"
+│   count = 29
+└   entries = 29-element Vector{String}: …
+┌ Info: Reading HLS rasters into arrays
+│   band = "SWIR1"
+└   nrasters = 29
+┌ Info: Searching HLS band directory
+│   band = "SWIR2"
+└   directory = "/Users/halverso/data/Kings_Canyon_HLS/L30/SWIR2"
+┌ Info: Found HLS files
+│   band = "SWIR2"
+└   nfiles = 45
+┌ Info: File/date list
+│   label = "HLS available (SWIR2)"
+│   count = 45
+└   entries = 45-element Vector{String}: …
+┌ Info: Filtered HLS files by date
+│   band = "SWIR2"
+│   selected_files = 29
+│   date_start = 2024-03-25
+└   date_end = 2024-07-27
+┌ Info: File/date list
+│   label = "HLS selected (SWIR2)"
+│   count = 29
+└   entries = 29-element Vector{String}: …
+┌ Info: Reading HLS rasters into arrays
+│   band = "SWIR2"
+└   nrasters = 29
+┌ Info: Constructing HLS data cube
+│   ny = 265
+│   nx = 202
+│   nbands = 7
+└   ntime = 29
+┌ Info: Completed HLS load
+│   directory = "/Users/halverso/data/Kings_Canyon_HLS/L30/"
+└   output_size = (265, 202, 7, 29)
+┌ Info: Array summary
+│   label = "HLS cube: "
+│   size = (265, 202, 7, 29)
+│   total_count = 10866590
+│   finite_count = 3249514
+│   finite_fraction = 0.2990371404460829
+│   nan_count = 7617076
+│   inf_count = 0
+│   min = 0.0f0
+│   max = 1.3827f0
+│   mean = 0.4176507f0
+│   std = 0.36572945f0
+│   p01 = 0.0071000000461936
+│   p50 = 0.2653000056743622
+└   p99 = 1.1963000297546387
+┌ Info: Loading HLS data
+│   directory = "/Users/halverso/data/Kings_Canyon_HLS/S30/"
+│   bands = 11-element Vector{String}: …
+└   date_range = 2-element Vector{Date}: …
+┌ Info: Searching HLS band directory
+│   band = "coastal_aerosol"
+└   directory = "/Users/halverso/data/Kings_Canyon_HLS/S30/coastal_aerosol"
+┌ Info: Found HLS files
+│   band = "coastal_aerosol"
+└   nfiles = 73
+┌ Info: File/date list
+│   label = "HLS available (coastal_aerosol)"
+│   count = 73
+└   entries = 73-element Vector{String}: …
+┌ Info: Filtered HLS files by date
+│   band = "coastal_aerosol"
+│   selected_files = 50
+│   date_start = 2024-03-25
+└   date_end = 2024-07-27
+┌ Info: File/date list
+│   label = "HLS selected (coastal_aerosol)"
+│   count = 50
+└   entries = 50-element Vector{String}: …
+┌ Info: Reading HLS rasters into arrays
+│   band = "coastal_aerosol"
+└   nrasters = 50
+┌ Info: Searching HLS band directory
+│   band = "blue"
+└   directory = "/Users/halverso/data/Kings_Canyon_HLS/S30/blue"
+┌ Info: Found HLS files
+│   band = "blue"
+└   nfiles = 73
+┌ Info: File/date list
+│   label = "HLS available (blue)"
+│   count = 73
+└   entries = 73-element Vector{String}: …
+┌ Info: Filtered HLS files by date
+│   band = "blue"
+│   selected_files = 50
+│   date_start = 2024-03-25
+└   date_end = 2024-07-27
+┌ Info: File/date list
+│   label = "HLS selected (blue)"
+│   count = 50
+└   entries = 50-element Vector{String}: …
+┌ Info: Reading HLS rasters into arrays
+│   band = "blue"
+└   nrasters = 50
+┌ Info: Searching HLS band directory
+│   band = "green"
+└   directory = "/Users/halverso/data/Kings_Canyon_HLS/S30/green"
+┌ Info: Found HLS files
+│   band = "green"
+└   nfiles = 73
+┌ Info: File/date list
+│   label = "HLS available (green)"
+│   count = 73
+└   entries = 73-element Vector{String}: …
+┌ Info: Filtered HLS files by date
+│   band = "green"
+│   selected_files = 50
+│   date_start = 2024-03-25
+└   date_end = 2024-07-27
+┌ Info: File/date list
+│   label = "HLS selected (green)"
+│   count = 50
+└   entries = 50-element Vector{String}: …
+┌ Info: Reading HLS rasters into arrays
+│   band = "green"
+└   nrasters = 50
+┌ Info: Searching HLS band directory
+│   band = "red"
+└   directory = "/Users/halverso/data/Kings_Canyon_HLS/S30/red"
+┌ Info: Found HLS files
+│   band = "red"
+└   nfiles = 73
+┌ Info: File/date list
+│   label = "HLS available (red)"
+│   count = 73
+└   entries = 73-element Vector{String}: …
+┌ Info: Filtered HLS files by date
+│   band = "red"
+│   selected_files = 50
+│   date_start = 2024-03-25
+└   date_end = 2024-07-27
+┌ Info: File/date list
+│   label = "HLS selected (red)"
+│   count = 50
+└   entries = 50-element Vector{String}: …
+┌ Info: Reading HLS rasters into arrays
+│   band = "red"
+└   nrasters = 50
+┌ Info: Searching HLS band directory
+│   band = "rededge1"
+└   directory = "/Users/halverso/data/Kings_Canyon_HLS/S30/rededge1"
+┌ Info: Found HLS files
+│   band = "rededge1"
+└   nfiles = 73
+┌ Info: File/date list
+│   label = "HLS available (rededge1)"
+│   count = 73
+└   entries = 73-element Vector{String}: …
+┌ Info: Filtered HLS files by date
+│   band = "rededge1"
+│   selected_files = 50
+│   date_start = 2024-03-25
+└   date_end = 2024-07-27
+┌ Info: File/date list
+│   label = "HLS selected (rededge1)"
+│   count = 50
+└   entries = 50-element Vector{String}: …
+┌ Info: Reading HLS rasters into arrays
+│   band = "rededge1"
+└   nrasters = 50
+┌ Info: Searching HLS band directory
+│   band = "rededge2"
+└   directory = "/Users/halverso/data/Kings_Canyon_HLS/S30/rededge2"
+┌ Info: Found HLS files
+│   band = "rededge2"
+└   nfiles = 73
+┌ Info: File/date list
+│   label = "HLS available (rededge2)"
+│   count = 73
+└   entries = 73-element Vector{String}: …
+┌ Info: Filtered HLS files by date
+│   band = "rededge2"
+│   selected_files = 50
+│   date_start = 2024-03-25
+└   date_end = 2024-07-27
+┌ Info: File/date list
+│   label = "HLS selected (rededge2)"
+│   count = 50
+└   entries = 50-element Vector{String}: …
+┌ Info: Reading HLS rasters into arrays
+│   band = "rededge2"
+└   nrasters = 50
+┌ Info: Searching HLS band directory
+│   band = "rededge3"
+└   directory = "/Users/halverso/data/Kings_Canyon_HLS/S30/rededge3"
+┌ Info: Found HLS files
+│   band = "rededge3"
+└   nfiles = 73
+┌ Info: File/date list
+│   label = "HLS available (rededge3)"
+│   count = 73
+└   entries = 73-element Vector{String}: …
+┌ Info: Filtered HLS files by date
+│   band = "rededge3"
+│   selected_files = 50
+│   date_start = 2024-03-25
+└   date_end = 2024-07-27
+┌ Info: File/date list
+│   label = "HLS selected (rededge3)"
+│   count = 50
+└   entries = 50-element Vector{String}: …
+┌ Info: Reading HLS rasters into arrays
+│   band = "rededge3"
+└   nrasters = 50
+┌ Info: Searching HLS band directory
+│   band = "NIR_broad"
+└   directory = "/Users/halverso/data/Kings_Canyon_HLS/S30/NIR_broad"
+┌ Info: Found HLS files
+│   band = "NIR_broad"
+└   nfiles = 73
+┌ Info: File/date list
+│   label = "HLS available (NIR_broad)"
+│   count = 73
+└   entries = 73-element Vector{String}: …
+┌ Info: Filtered HLS files by date
+│   band = "NIR_broad"
+│   selected_files = 50
+│   date_start = 2024-03-25
+└   date_end = 2024-07-27
+┌ Info: File/date list
+│   label = "HLS selected (NIR_broad)"
+│   count = 50
+└   entries = 50-element Vector{String}: …
+┌ Info: Reading HLS rasters into arrays
+│   band = "NIR_broad"
+└   nrasters = 50
+┌ Info: Searching HLS band directory
+│   band = "NIR"
+└   directory = "/Users/halverso/data/Kings_Canyon_HLS/S30/NIR"
+┌ Info: Found HLS files
+│   band = "NIR"
+└   nfiles = 73
+┌ Info: File/date list
+│   label = "HLS available (NIR)"
+│   count = 73
+└   entries = 73-element Vector{String}: …
+┌ Info: Filtered HLS files by date
+│   band = "NIR"
+│   selected_files = 50
+│   date_start = 2024-03-25
+└   date_end = 2024-07-27
+┌ Info: File/date list
+│   label = "HLS selected (NIR)"
+│   count = 50
+└   entries = 50-element Vector{String}: …
+┌ Info: Reading HLS rasters into arrays
+│   band = "NIR"
+└   nrasters = 50
+┌ Info: Searching HLS band directory
+│   band = "SWIR1"
+└   directory = "/Users/halverso/data/Kings_Canyon_HLS/S30/SWIR1"
+┌ Info: Found HLS files
+│   band = "SWIR1"
+└   nfiles = 73
+┌ Info: File/date list
+│   label = "HLS available (SWIR1)"
+│   count = 73
+└   entries = 73-element Vector{String}: …
+┌ Info: Filtered HLS files by date
+│   band = "SWIR1"
+│   selected_files = 50
+│   date_start = 2024-03-25
+└   date_end = 2024-07-27
+┌ Info: File/date list
+│   label = "HLS selected (SWIR1)"
+│   count = 50
+└   entries = 50-element Vector{String}: …
+┌ Info: Reading HLS rasters into arrays
+│   band = "SWIR1"
+└   nrasters = 50
+┌ Info: Searching HLS band directory
+│   band = "SWIR2"
+└   directory = "/Users/halverso/data/Kings_Canyon_HLS/S30/SWIR2"
+┌ Info: Found HLS files
+│   band = "SWIR2"
+└   nfiles = 73
+┌ Info: File/date list
+│   label = "HLS available (SWIR2)"
+│   count = 73
+└   entries = 73-element Vector{String}: …
+┌ Info: Filtered HLS files by date
+│   band = "SWIR2"
+│   selected_files = 50
+│   date_start = 2024-03-25
+└   date_end = 2024-07-27
+┌ Info: File/date list
+│   label = "HLS selected (SWIR2)"
+│   count = 50
+└   entries = 50-element Vector{String}: …
+┌ Info: Reading HLS rasters into arrays
+│   band = "SWIR2"
+└   nrasters = 50
+┌ Info: Constructing HLS data cube
+│   ny = 265
+│   nx = 202
+│   nbands = 11
+└   ntime = 50
+┌ Info: Completed HLS load
+│   directory = "/Users/halverso/data/Kings_Canyon_HLS/S30/"
+└   output_size = (265, 202, 11, 50)
+┌ Info: Array summary
+│   label = "HLS cube: "
+│   size = (265, 202, 11, 50)
+│   total_count = 29441500
+│   finite_count = 17013103
+│   finite_fraction = 0.5778612842416317
+│   nan_count = 12428397
+│   inf_count = 0
+│   min = 0.0f0
+│   max = 1.2677f0
+│   mean = 0.38706163f0
+│   std = 0.28887925f0
+│   p01 = 0.006899999920278788
+│   p50 = 0.2824999988079071
+└   p99 = 1.0245000123977661
+┌ Info: Loaded HLS products
+│   l30_size = (265, 202, 7, 29)
+└   s30_size = (265, 202, 11, 50)
+┌ Info: Loading SRF files
+│   l30_path = "/Users/halverso/Projects/HyperSTARS.jl/src/HLS_L30_srf.csv"
+└   s30_path = "/Users/halverso/Projects/HyperSTARS.jl/src/HLS_S30_srf.csv"
+┌ Info: Read SRF matrices
+│   l30_size = (895, 9)
+└   s30_size = (2301, 14)
+┌ Info: Prepared SRF dictionaries
+│   l30_waves = 7
+└   s30_waves = 11
+┌ Info: Loading EMIT metadata
+└   path = "/Users/halverso/Projects/HyperSTARS.jl/src/EMIT_metadata.csv"
+┌ Info: Searching EMIT directory
+└   directory = "/Users/halverso/data/Kings_Canyon_EMIT"
+┌ Info: Found EMIT files
+└   nfiles = 4
+┌ Info: File/date list
+│   label = "EMIT available"
+│   count = 4
+└   entries = 4-element Vector{String}: …
+┌ Info: Filtered EMIT files by date
+│   selected_files = 4
+│   date_start = 2024-03-25
+└   date_end = 2024-07-27
+┌ Info: File/date list
+│   label = "EMIT selected"
+│   count = 4
+└   entries = 4-element Vector{String}: …
+┌ Info: Reading EMIT rasters into arrays
+└   nrasters = 4
+┌ Info: Completed EMIT load
+└   output_size = (132, 101, 212, 4)
+┌ Info: Array summary
+│   label = "EMIT cube"
+│   size = (132, 101, 212, 4)
+│   total_count = 11305536
+│   finite_count = 5592560
+│   finite_fraction = 0.49467446744674465
+│   nan_count = 5712976
+│   inf_count = 0
+│   min = -0.01f0
+│   max = 1.2359078f0
+│   mean = 0.25321138f0
+│   std = 0.26382792f0
+│   p01 = -0.009999999776482582
+│   p50 = 0.19773563742637634
+└   p99 = 0.9874226450920105
+┌ Info: Loaded EMIT product
+└   emit_size = (132, 101, 212, 4)
+┌ Info: Built unified timeline
+│   start_date = 2024-03-25
+│   end_date = 2024-07-27
+└   ndates = 125
+┌ Info: Array summary
+│   label = "Input array HLS L30"
+│   size = (265, 202, 7, 29)
+│   total_count = 10866590
+│   finite_count = 3249514
+│   finite_fraction = 0.2990371404460829
+│   nan_count = 7617076
+│   inf_count = 0
+│   min = 0.0f0
+│   max = 1.3827f0
+│   mean = 0.4176507f0
+│   std = 0.36572945f0
+│   p01 = 0.0071000000461936
+│   p50 = 0.2653000056743622
+└   p99 = 1.1963000297546387
+┌ Info: Array summary
+│   label = "Input array HLS S30"
+│   size = (265, 202, 11, 50)
+│   total_count = 29441500
+│   finite_count = 17013103
+│   finite_fraction = 0.5778612842416317
+│   nan_count = 12428397
+│   inf_count = 0
+│   min = 0.0f0
+│   max = 1.2677f0
+│   mean = 0.38706163f0
+│   std = 0.28887925f0
+│   p01 = 0.006899999920278788
+│   p50 = 0.2824999988079071
+└   p99 = 1.0245000123977661
+┌ Info: Array summary
+│   label = "Input array EMIT"
+│   size = (132, 101, 212, 4)
+│   total_count = 11305536
+│   finite_count = 5592560
+│   finite_fraction = 0.49467446744674465
+│   nan_count = 5712976
+│   inf_count = 0
+│   min = -0.01f0
+│   max = 1.2359078f0
+│   mean = 0.25321138f0
+│   std = 0.26382792f0
+│   p01 = -0.009999999776482582
+│   p50 = 0.19773563742637634
+└   p99 = 0.9874226450920105
+┌ Info: Prepared instrument data structures
+└   ninstruments = 3
+┌ Info: Loaded all input datasets
+└   all_dates_count = 125
+[ Info: Starting PCA fit from EMIT data
+┌ Info: EMIT cube dimensions for PCA
+│   ny = 132
+│   nx = 101
+│   nwaves = 212
+└   ntime = 4
+┌ Info: Completed PCA fit
+│   ncomponents = 4
+└   explained_variance_sum = 170.58089f0
+┌ Info: PCA basis ready
+└   basis_size = (212, 4)
+┌ Info: Starting scene fusion
+│   target_times = 125-element Vector{Int64}: …
+│   nsamp = 50
+└   window_buffer = 4
+Progress: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| Time: 0:22:35
+1416.077969 seconds (32.82 M allocations: 47.752 GiB, 0.36% gc time, 20 lock conflicts, 0.42% compilation time: <1% of which was recompilation)
+┌ Info: Scene fusion complete
+│   fused_size = (265, 202, 212, 125)
+└   fused_sd_size = (265, 202, 212, 125)
+fish: Job 1, 'julia --project=. scripts/kings…' terminated by signal SIGKILL (Forced quit)
