@@ -463,6 +463,20 @@ target_times = eachindex(all_dates)
 log_array_summary("Fused mean (all target times)", fused_images)
 log_array_summary("Fused sd (all target times)", fused_sd_images)
 
+# Free large input arrays no longer needed after fusion
+data30m_list = nothing
+inst30m_geodata = nothing
+pmean = nothing
+pvar = nothing
+model_pars = nothing
+B = nothing
+Bs = nothing
+mm = nothing
+sx = nothing
+vrs = nothing
+GC.gc()
+@info "Released input arrays from memory"
+
 # Write fused outputs as one multi-band GeoTIFF per day (mean + sd)
 output_dir = expanduser("~/data/EMIT-HLS-fusion-output")
 mkpath(output_dir)
