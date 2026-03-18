@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=hyperstars_full
-#SBATCH --mem=80G
+#SBATCH --mem=40G
 #SBATCH --time=4:00:00
 #SBATCH --cpus-per-task=16
 #SBATCH --nodes=1
