@@ -109,9 +109,7 @@ end
 ######### Wrapper functions to reduce memory and compiling time
 function get_hls_data(dir, bands, date_range)
     @info "Loading HLS data" directory=dir bands=bands date_range=date_range
-    raster_list = []
-    time_dates = nothing
-    band_arrays_list = []
+    band_date_arrays = Vector{Dict{Date, Any}}()
     ref_raster = nothing
     
     for band in bands 
@@ -123,44 +121,86 @@ function get_hls_data(dir, bands, date_range)
             continue
         end
         @info "Found HLS files" band=band nfiles=length(band_files)
-        band_dates = [Date(match(r"\d{8}", f).match, "yyyymmdd") for f in band_files] ## extract dates from tif filenames
+        band_date_pairs = Tuple{Date, String}[]
+        for f in band_files
+            m = match(r"\d{8}", f)
+            if m === nothing
+                @warn "Skipping HLS file with no date stamp" band=band file=f
+                continue
+            end
+            push!(band_date_pairs, (Date(m.match, "yyyymmdd"), f))
+        end
+        if isempty(band_date_pairs)
+            @warn "No dated files found for band" band=band directory=band_dir
+            continue
+        end
+
+        sort!(band_date_pairs, by=x -> x[1])
+        band_dates = first.(band_date_pairs)
+        band_files_sorted = last.(band_date_pairs)
         log_file_date_list("HLS available ($(band))", band_files, band_dates)
         kp_dates = date_range[1] .<= band_dates .<= date_range[2] ## find all available dates within target date range
         @info "Filtered HLS files by date" band=band selected_files=count(kp_dates) date_start=date_range[1] date_end=date_range[2]
-        log_file_date_list("HLS selected ($(band))", band_files[kp_dates], band_dates[kp_dates])
-        band_rasters = [Raster(x, lazy=true) for x in band_files[kp_dates]] ## read geotiffs for all dates found in date range, using lazy loading
-        if isempty(band_rasters)
+        selected_files = band_files_sorted[kp_dates]
+        selected_dates = band_dates[kp_dates]
+        log_file_date_list("HLS selected ($(band))", selected_files, selected_dates)
+
+        if isempty(selected_files)
             @warn "No rasters found for band $band in specified date range"
             continue
         end
-        if ref_raster === nothing
-            ref_raster = band_rasters[1]
+
+        @info "Reading HLS rasters into arrays" band=band nrasters=length(selected_files)
+        band_map = Dict{Date, Any}()
+        for (dt, file_path) in zip(selected_dates, selected_files)
+            try
+                raster = Raster(file_path, lazy=true)
+                arr = Array(raster)
+                band_map[dt] = arr
+                if ref_raster === nothing
+                    ref_raster = raster
+                end
+            catch err
+                @warn "Skipping unreadable HLS raster" band=band date=dt file=file_path error=sprint(showerror, err)
+            end
         end
-        if time_dates === nothing
-            time_dates = band_dates[kp_dates]
+
+        if isempty(band_map)
+            @warn "No readable rasters remained for band" band=band
+            continue
         end
-        # Convert rasters to arrays
-        @info "Reading HLS rasters into arrays" band=band nrasters=length(band_rasters)
-        band_arrays = [Array(r) for r in band_rasters]
-        push!(band_arrays_list, band_arrays)
+        push!(band_date_arrays, band_map)
     end ## loop over all bands
 
-    if isempty(band_arrays_list)
+    if isempty(band_date_arrays)
         error("No valid HLS raster data found in $dir for date range $(date_range[1]) to $(date_range[2]).")
     end
 
+    # Keep only dates available across all retained bands to enforce a consistent cube.
+    common_dates = sort!(collect(reduce(intersect, [Set(keys(m)) for m in band_date_arrays])))
+    if isempty(common_dates)
+        error("No common HLS dates across readable bands in $dir for date range $(date_range[1]) to $(date_range[2]).")
+    end
+
+    nonempty_maps = filter(m -> !isempty(m), band_date_arrays)
+    sample_arr = first(values(nonempty_maps[1]))
+
     # Get dimensions from first raster
-    ny, nx = size(band_arrays_list[1][1])
-    ntime = length(time_dates)
-    nbands = length(findall(x -> !isempty(x), band_arrays_list))  # Only count non-empty bands
+    ny, nx = size(sample_arr)
+    ntime = length(common_dates)
+    nbands = length(nonempty_maps)
     @info "Constructing HLS data cube" ny=ny nx=nx nbands=nbands ntime=ntime
     
     # Create output array
-    hls_array = zeros(Float32, ny, nx, nbands, ntime)
+    hls_array = fill(NaN32, ny, nx, nbands, ntime)
     
     # Fill array by concatenating times, then bands
-    for (bi, band_arrays) in enumerate(band_arrays_list)
-        for (ti, arr) in enumerate(band_arrays)
+    for (bi, band_map) in enumerate(nonempty_maps)
+        for (ti, dt) in enumerate(common_dates)
+            arr = band_map[dt]
+            if size(arr) != (ny, nx)
+                error("Inconsistent raster dimensions for band index $(bi) date $(dt): expected ($(ny), $(nx)), got $(size(arr)).")
+            end
             # Replace missing values with NaN first, then assign
             for y in 1:ny, x in 1:nx
                 val = arr[y, x]
@@ -172,7 +212,7 @@ function get_hls_data(dir, bands, date_range)
     # Keep y,x,band,time order to match expected data layout (nx x ny x nw x T)
     @info "Completed HLS load" directory=dir output_size=size(hls_array)
     log_array_summary("HLS cube: $(basename(normpath(dir)))", hls_array)
-    return hls_array, time_dates, ref_raster
+    return hls_array, common_dates, ref_raster
 end
 
 #### loading EMIT data from EMIT directory
