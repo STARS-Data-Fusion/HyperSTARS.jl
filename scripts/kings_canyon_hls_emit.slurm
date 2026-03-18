@@ -43,8 +43,17 @@ export JULIA_NUM_THREADS=1
 # Change to project directory
 cd $SLURM_SUBMIT_DIR
 
+LOG_DIR="$SLURM_SUBMIT_DIR/logs"
+RUN_STAMP="$(date +%Y%m%d_%H%M%S)"
+JOB_TAG="${SLURM_JOB_ID:-manual}_${RUN_STAMP}"
+STDOUT_LOG="$LOG_DIR/kings_canyon_hls_emit_${JOB_TAG}.log"
+STDERR_LOG="$LOG_DIR/kings_canyon_hls_emit_${JOB_TAG}.err"
+mkdir -p "$LOG_DIR"
+
 echo ""
 echo "Working directory: $(pwd)"
+echo "Stdout log: $STDOUT_LOG"
+echo "Stderr log: $STDERR_LOG"
 echo ""
 
 # Generate required CSV files if they don't exist
@@ -70,7 +79,15 @@ echo "WARNING: This is the full 31-day production run"
 echo ""
 
 # Run the Julia script
-julia --project=. scripts/kings_canyon_hls_emit.jl
+if command -v stdbuf >/dev/null 2>&1; then
+    stdbuf -oL -eL julia --project=. scripts/kings_canyon_hls_emit.jl \
+        > >(tee -a "$STDOUT_LOG") \
+        2> >(tee -a "$STDERR_LOG" >&2)
+else
+    julia --project=. scripts/kings_canyon_hls_emit.jl \
+        > >(tee -a "$STDOUT_LOG") \
+        2> >(tee -a "$STDERR_LOG" >&2)
+fi
 
 EXIT_CODE=$?
 
