@@ -1666,6 +1666,7 @@ It divides the scene into spatial windows and processes each window in parallel 
 - `cov_wt::Real = 0.7`: Weighting factor for mixing fixed and state-dependent process noise covariance.
 - `ar_phi::Real = 1.0`: Autoregressive parameter for the state transition.
 - `nb_coarse::Real = 2.0`: Number of coarse pixels to extend the window bounding box for coarse instruments.
+- `use_progress_bar::Bool = true`: If `true`, shows a progress bar during `pmap`; if `false`, logs per-iteration status with `@info`.
 
 # Returns
 - `fused_image::AbstractArray{Float64}`: The complete fused mean image for the entire scene,
@@ -1692,7 +1693,8 @@ function scene_fusion_pmap(inst_data::AbstractVector{InstrumentData},
                       cov_wt::Real = 0.3,
                       tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
                       ar_phi::Real = 1.0,
-                      window_radius::Real = 0.0)
+                      window_radius::Real = 0.0,
+                      use_progress_bar::Bool = true)
 
     ### Define target extent and target + buffer extent
     # Extract geospatial parameters for windows and target grid.
@@ -1765,10 +1767,23 @@ function scene_fusion_pmap(inst_data::AbstractVector{InstrumentData},
 
     # Perform parallel fusion using `pmap`. Each element of `T` (a dictionary for one window)
     # is processed by `hyperSTARS_fusion_kr_dict`. `pmap` distributes these tasks.
-    result = @showprogress pmap(x -> hyperSTARS_fusion_kr_dict(x,  
-                    target_waves, spectral_mean, B,
-                    target_times, smooth, spatial_mod, 
-                    obs_operator, state_in_cov, cov_wt, tscov_pars, ar_phi) , T );
+    if use_progress_bar
+        result = @showprogress pmap(x -> hyperSTARS_fusion_kr_dict(x,
+                        target_waves, spectral_mean, B,
+                        target_times, smooth, spatial_mod,
+                        obs_operator, state_in_cov, cov_wt, tscov_pars, ar_phi), T)
+    else
+        result = pmap(enumerate(T)) do (ii, x)
+            k, l = inds[ii, :]
+            @info "Starting window fusion iteration" iteration=ii total=nr window=(k, l)
+            out = hyperSTARS_fusion_kr_dict(x,
+                        target_waves, spectral_mean, B,
+                        target_times, smooth, spatial_mod,
+                        obs_operator, state_in_cov, cov_wt, tscov_pars, ar_phi)
+            @info "Completed window fusion iteration" iteration=ii total=nr window=(k, l)
+            out
+        end
+    end
     
     # Reconstruct the full fused image and standard deviation image from the results
     # obtained from each individual window.

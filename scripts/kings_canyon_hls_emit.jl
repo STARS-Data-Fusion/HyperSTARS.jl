@@ -458,7 +458,8 @@ target_times = eachindex(all_dates)
             cov_wt=0.2,
             tscov_pars = sqrt.(vrs) ./ 10.0, 
             ar_phi=1.0,
-            window_radius=100.0);
+            window_radius=100.0,
+            use_progress_bar=false);
 @info "Scene fusion complete" fused_size=size(fused_images) fused_sd_size=size(fused_sd_images)
 log_array_summary("Fused mean (all target times)", fused_images)
 log_array_summary("Fused sd (all target times)", fused_sd_images)
