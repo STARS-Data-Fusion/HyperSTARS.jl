@@ -66,6 +66,7 @@ using Random
 using Interpolations
 using KernelFunctions
 using Distributed # For parallel processing with pmap
+using Serialization
 
 # BLAS.set_num_threads(1) # This line is commented out, potentially for performance tuning
 
@@ -1667,6 +1668,7 @@ It divides the scene into spatial windows and processes each window in parallel 
 - `ar_phi::Real = 1.0`: Autoregressive parameter for the state transition.
 - `nb_coarse::Real = 2.0`: Number of coarse pixels to extend the window bounding box for coarse instruments.
 - `use_progress_bar::Bool = true`: If `true`, shows a progress bar during `pmap`; if `false`, logs per-iteration status with `@info`.
+- `output_filenames::Union{Nothing,AbstractVector{<:AbstractString}} = nothing`: Optional list of output file paths, one per window. When provided, each window result is serialized to disk.
 
 # Returns
 - `fused_image::AbstractArray{Float64}`: The complete fused mean image for the entire scene,
@@ -1694,7 +1696,8 @@ function scene_fusion_pmap(inst_data::AbstractVector{InstrumentData},
                       tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
                       ar_phi::Real = 1.0,
                       window_radius::Real = 0.0,
-                      use_progress_bar::Bool = true)
+                      use_progress_bar::Bool = true,
+                      output_filenames::Union{Nothing,AbstractVector{<:AbstractString}} = nothing)
 
     ### Define target extent and target + buffer extent
     # Extract geospatial parameters for windows and target grid.
@@ -1718,6 +1721,10 @@ function scene_fusion_pmap(inst_data::AbstractVector{InstrumentData},
     inds = hcat(repeat(1:nwindows[1], inner=nwindows[2]), repeat(1:nwindows[2], outer=nwindows[1]))
     
     nr = size(inds,1) # Total number of spatial windows
+
+    if !isnothing(output_filenames) && length(output_filenames) != nr
+        throw(ArgumentError("Length of output_filenames ($(length(output_filenames))) must match number of windows ($nr)."))
+    end
 
     # Prepare input dictionaries for each spatial window.
     # This loop is essentially the content of the `create_data_dicts` function,
@@ -1793,6 +1800,16 @@ function scene_fusion_pmap(inst_data::AbstractVector{InstrumentData},
         # `result[i][3]` contains `fused_sd_image` for window `i`.
         @views fused_image[result[i][1],:,:] = result[i][2]
         @views fused_sd_image[result[i][1],:,:] = result[i][3]
+
+        if !isnothing(output_filenames)
+            output_file = output_filenames[i]
+            mkpath(dirname(output_file))
+            serialize(output_file, Dict(
+                :kp_ij => result[i][1],
+                :fused_image => result[i][2],
+                :fused_sd_image => result[i][3]
+            ))
+        end
     end
     
     return fused_image, fused_sd_image

@@ -25,6 +25,7 @@ addprocs(Sys.CPU_THREADS - 1) ## workers (using Distributed package), Check how 
 const DEFAULT_METADATA_DIR = joinpath(pkgdir(HyperSTARS), "src")
 const TARGET_START_DATE = Date("2024-04-01")
 const TARGET_END_DATE = Date("2024-05-01")
+const OUTPUT_WRITE_MODE = :pass_output_filenames # :pass_output_filenames | :write_after_completion
 
 global_logger(ConsoleLogger(stdout, Logging.Info))
 @info "Initialized logging and worker pool" workers=nworkers() cpu_threads=Sys.CPU_THREADS
@@ -439,6 +440,23 @@ end
 target_times = eachindex(all_dates)
 @info "Starting scene fusion" target_times=collect(target_times) nsamp=50 window_buffer=4
 
+output_dir = expanduser("~/data/EMIT-HLS-fusion-output")
+mkpath(output_dir)
+@info "Ensured output directory exists" output_directory=output_dir
+
+scene_output_filenames = nothing
+if OUTPUT_WRITE_MODE == :pass_output_filenames
+    inds = hcat(repeat(1:nwindows[1], inner=nwindows[2]), repeat(1:nwindows[2], outer=nwindows[1]))
+    scene_window_output_dir = joinpath(output_dir, "window_outputs")
+    mkpath(scene_window_output_dir)
+    scene_output_filenames = [joinpath(scene_window_output_dir, "window_$(inds[ii,1])_$(inds[ii,2]).jls") for ii in 1:size(inds,1)]
+    @info "Configured per-window output serialization" mode=String(OUTPUT_WRITE_MODE) nfiles=length(scene_output_filenames) directory=scene_window_output_dir
+elseif OUTPUT_WRITE_MODE == :write_after_completion
+    @info "Configured post-completion GeoTIFF writing" mode=String(OUTPUT_WRITE_MODE)
+else
+    error("Unsupported OUTPUT_WRITE_MODE: $(OUTPUT_WRITE_MODE). Use :pass_output_filenames or :write_after_completion.")
+end
+
 @time fused_images, fused_sd_images = scene_fusion_pmap(data30m_list,
             inst30m_geodata,
             window30m_geodata,
@@ -459,7 +477,8 @@ target_times = eachindex(all_dates)
             tscov_pars = sqrt.(vrs) ./ 10.0, 
             ar_phi=1.0,
             window_radius=100.0,
-            use_progress_bar=false);
+            use_progress_bar=false,
+            output_filenames=scene_output_filenames);
 @info "Scene fusion complete" fused_size=size(fused_images) fused_sd_size=size(fused_sd_images)
 log_array_summary("Fused mean (all target times)", fused_images)
 log_array_summary("Fused sd (all target times)", fused_sd_images)
@@ -478,30 +497,30 @@ vrs = nothing
 GC.gc()
 @info "Released input arrays from memory"
 
-# Write fused outputs as one multi-band GeoTIFF per day (mean + sd)
-output_dir = expanduser("~/data/EMIT-HLS-fusion-output")
-mkpath(output_dir)
-@info "Ensured output directory exists" output_directory=output_dir
+if OUTPUT_WRITE_MODE == :write_after_completion
+    sample_tif = first_tif_file(joinpath(dir_path, "Kings_Canyon_HLS/L30"))
+    proj_wkt = ArchGDAL.read(sample_tif) do ds
+        ArchGDAL.getproj(ds)
+    end
+    @info "Read projection from sample TIFF" sample_tif=sample_tif
 
-sample_tif = first_tif_file(joinpath(dir_path, "Kings_Canyon_HLS/L30"))
-proj_wkt = ArchGDAL.read(sample_tif) do ds
-    ArchGDAL.getproj(ds)
+    for (out_ti, global_ti) in enumerate(target_times)
+        date_str = Dates.format(all_dates[global_ti], "yyyymmdd")
+
+        mean_path = joinpath(output_dir, "fused_mean_$(date_str).tif")
+        sd_path = joinpath(output_dir, "fused_sd_$(date_str).tif")
+        @info "Writing fused outputs for date" date=date_str mean_path=mean_path sd_path=sd_path
+
+        log_array_summary("Fused mean (date=$(date_str))", fused_images[:,:,:,out_ti])
+        log_array_summary("Fused sd (date=$(date_str))", fused_sd_images[:,:,:,out_ti])
+
+        write_multiband_geotiff(mean_path, fused_images[:,:,:,out_ti], hls_l30_origin, hls_l30_csize, proj_wkt)
+        write_multiband_geotiff(sd_path, fused_sd_images[:,:,:,out_ti], hls_l30_origin, hls_l30_csize, proj_wkt)
+    end
+
+    @info "Finished writing all fused outputs" output_directory=output_dir
+    println("Wrote fused GeoTIFF outputs to: $output_dir")
+else
+    @info "Per-window outputs were written during scene_fusion_pmap" output_directory=joinpath(output_dir, "window_outputs")
+    println("Wrote per-window serialized outputs to: $(joinpath(output_dir, "window_outputs"))")
 end
-@info "Read projection from sample TIFF" sample_tif=sample_tif
-
-for (out_ti, global_ti) in enumerate(target_times)
-    date_str = Dates.format(all_dates[global_ti], "yyyymmdd")
-
-    mean_path = joinpath(output_dir, "fused_mean_$(date_str).tif")
-    sd_path = joinpath(output_dir, "fused_sd_$(date_str).tif")
-    @info "Writing fused outputs for date" date=date_str mean_path=mean_path sd_path=sd_path
-
-    log_array_summary("Fused mean (date=$(date_str))", fused_images[:,:,:,out_ti])
-    log_array_summary("Fused sd (date=$(date_str))", fused_sd_images[:,:,:,out_ti])
-
-    write_multiband_geotiff(mean_path, fused_images[:,:,:,out_ti], hls_l30_origin, hls_l30_csize, proj_wkt)
-    write_multiband_geotiff(sd_path, fused_sd_images[:,:,:,out_ti], hls_l30_origin, hls_l30_csize, proj_wkt)
-end
-
-@info "Finished writing all fused outputs" output_directory=output_dir
-println("Wrote fused GeoTIFF outputs to: $output_dir")
