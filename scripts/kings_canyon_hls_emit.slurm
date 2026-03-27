@@ -1,23 +1,23 @@
 #!/bin/bash
-#SBATCH --job-name=hyperstars_minimal
-#SBATCH --mem=32G
-#SBATCH --time=1:30:00
-#SBATCH --cpus-per-task=8
+#SBATCH --job-name=hyperstars_full
+#SBATCH --mem=40G
+#SBATCH --time=4:00:00
+#SBATCH --cpus-per-task=16
 #SBATCH --nodes=1
-#SBATCH --output=hyperstars_minimal_%j.out
-#SBATCH --error=hyperstars_minimal_%j.err
+#SBATCH --output=hyperstars_full_%j.out
+#SBATCH --error=hyperstars_full_%j.err
 
-# HyperSTARS Minimal Example Job Script
-# Based on empirical measurements:
-#   - Peak memory: 21 GB (requesting 32 GB for safety)
-#   - Runtime: 49 minutes (requesting 90 minutes)
-#   - Workers: 4 (requesting 8 CPUs)
+# HyperSTARS Full Production Job Script
+# Based on extrapolated measurements:
+#   - Expected peak memory: ~60 GB (requesting 80 GB for safety)
+#   - Expected runtime: ~3 hours (requesting 4 hours)
+#   - Workers: configurable (requesting 16 CPUs)
 #
-# Configuration: 5 days (Aug 13-17, 2022), full 1411×2085 extent
-# Expected output: ~20 GB memory, ~50 minutes runtime
+# Configuration: 31 days (August 2022), full 1411×2085 extent
+# Note: Adjust memory/time based on your specific date range
 
 echo "=========================================="
-echo "HyperSTARS Minimal Example"
+echo "HyperSTARS Full Production Run"
 echo "=========================================="
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURM_NODELIST"
@@ -37,19 +37,28 @@ echo ""
 which julia
 julia --version
 
-# Set number of threads (optional, for threading within Julia)
+# Set number of threads (optional)
 export JULIA_NUM_THREADS=1
 
 # Change to project directory
 cd $SLURM_SUBMIT_DIR
 
+LOG_DIR="$SLURM_SUBMIT_DIR/logs"
+RUN_STAMP="$(date +%Y%m%d_%H%M%S)"
+JOB_TAG="${SLURM_JOB_ID:-manual}_${RUN_STAMP}"
+STDOUT_LOG="$LOG_DIR/kings_canyon_hls_emit_${JOB_TAG}.log"
+STDERR_LOG="$LOG_DIR/kings_canyon_hls_emit_${JOB_TAG}.err"
+mkdir -p "$LOG_DIR"
+
 echo ""
 echo "Working directory: $(pwd)"
+echo "Stdout log: $STDOUT_LOG"
+echo "Stderr log: $STDERR_LOG"
 echo ""
 
 # Generate required CSV files if they don't exist
 DATA_DIR="/gpfs/scratch/refl-datafusion-trtd"
-META_DIR="/gpfs/scratch/refl-datafusion-trtd/$USER/hyperstars_metadata"
+META_DIR="${HYPERSTARS_METADATA_DIR:-$SLURM_SUBMIT_DIR/src}"
 export HYPERSTARS_DATA_DIR="$DATA_DIR"
 export HYPERSTARS_METADATA_DIR="$META_DIR"
 mkdir -p "$META_DIR"
@@ -65,11 +74,20 @@ else
 fi
 
 echo ""
-echo "Running minimal_example.jl..."
+echo "Running kings_canyon_hls_emit.jl..."
+echo "WARNING: This is the full 31-day production run"
 echo ""
 
 # Run the Julia script
-julia --project=. scripts/minimal_example.jl
+if command -v stdbuf >/dev/null 2>&1; then
+    stdbuf -oL -eL julia --project=. scripts/kings_canyon_hls_emit.jl \
+        > >(tee -a "$STDOUT_LOG") \
+        2> >(tee -a "$STDERR_LOG" >&2)
+else
+    julia --project=. scripts/kings_canyon_hls_emit.jl \
+        > >(tee -a "$STDOUT_LOG") \
+        2> >(tee -a "$STDERR_LOG" >&2)
+fi
 
 EXIT_CODE=$?
 
