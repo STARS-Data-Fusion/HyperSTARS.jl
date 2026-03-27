@@ -1767,22 +1767,47 @@ function scene_fusion_pmap(inst_data::AbstractVector{InstrumentData},
 
     # Perform parallel fusion using `pmap`. Each element of `T` (a dictionary for one window)
     # is processed by `hyperSTARS_fusion_kr_dict`. `pmap` distributes these tasks.
+    format_duration(seconds::Real) = begin
+        total_seconds = max(round(Int, seconds), 0)
+        hours = div(total_seconds, 3600)
+        minutes = div(mod(total_seconds, 3600), 60)
+        secs = mod(total_seconds, 60)
+        lpad(hours, 2, '0') * ":" * lpad(minutes, 2, '0') * ":" * lpad(secs, 2, '0')
+    end
+
     if use_progress_bar
         result = @showprogress pmap(x -> hyperSTARS_fusion_kr_dict(x,
                         target_waves, spectral_mean, B,
                         target_times, smooth, spatial_mod,
                         obs_operator, state_in_cov, cov_wt, tscov_pars, ar_phi), T)
     else
+        progress_updates = RemoteChannel(() -> Channel{NamedTuple{(:ii, :window, :window_elapsed), Tuple{Int, NTuple{2, Int}, Float64}}}(nr))
+        progress_start = time()
+
+        progress_logger = @async begin
+            completed = 0
+            while completed < nr
+                update = take!(progress_updates)
+                completed += 1
+                elapsed = time() - progress_start
+                avg_per_window = elapsed / completed
+                eta = avg_per_window * (nr - completed)
+                @info "Completed window fusion iteration $(completed)/$(nr)" window_index=update.ii window=update.window elapsed=format_duration(elapsed) window_time=format_duration(update.window_elapsed) avg_per_window=format_duration(avg_per_window) eta=format_duration(eta)
+            end
+        end
+
         result = pmap(enumerate(T)) do (ii, x)
             k, l = inds[ii, :]
-            @info "Starting window fusion iteration" iteration=ii total=nr window=(k, l)
+            window_start = time()
             out = hyperSTARS_fusion_kr_dict(x,
                         target_waves, spectral_mean, B,
                         target_times, smooth, spatial_mod,
                         obs_operator, state_in_cov, cov_wt, tscov_pars, ar_phi)
-            @info "Completed window fusion iteration" iteration=ii total=nr window=(k, l)
+            put!(progress_updates, (ii=ii, window=(k, l), window_elapsed=time() - window_start))
             out
         end
+
+        wait(progress_logger)
     end
     
     # Reconstruct the full fused image and standard deviation image from the results

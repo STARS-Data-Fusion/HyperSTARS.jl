@@ -23,8 +23,8 @@ addprocs(Sys.CPU_THREADS - 1) ## workers (using Distributed package), Check how 
 @everywhere using HyperSTARS
 
 const DEFAULT_METADATA_DIR = joinpath(pkgdir(HyperSTARS), "src")
-const TARGET_START_DATE = Date("2024-04-01")
-const TARGET_END_DATE = Date("2024-05-01")
+const TARGET_START_DATE = Date("2024-03-25")
+const TARGET_END_DATE = Date("2024-07-27")
 
 global_logger(ConsoleLogger(stdout, Logging.Info))
 @info "Initialized logging and worker pool" workers=nworkers() cpu_threads=Sys.CPU_THREADS
