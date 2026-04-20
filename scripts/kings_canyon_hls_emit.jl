@@ -18,8 +18,8 @@ using Revise
 using HyperSTARS ## Pkg.add("https://github.com/STARS-Data-Fusion/HyperSTARS.jl") 
 
 # Rasters.checkmem!(false)
-addprocs(8)
-# addprocs(Sys.CPU_THREADS - 1) ## workers (using Distributed package), Check how this automatic detection works on gattaca
+# addprocs(8)
+addprocs(Sys.CPU_THREADS - 1) ## workers (using Distributed package), Check how this automatic detection works on gattaca
 
 @everywhere using HyperSTARS
 
@@ -389,8 +389,8 @@ date_range = [TARGET_START_DATE, TARGET_END_DATE]
 @info "Configured target date range" start_date=date_range[1] end_date=date_range[2]
 
 #### parent directory
-dir_path = "/Users/maggiej/Documents/Hyperspectral_DataFusion/Data/ArrowPeak/"
-# dir_path = expanduser("~/data/")
+# dir_path = "/Users/maggiej/Documents/Hyperspectral_DataFusion/Data/ArrowPeak/"
+dir_path = expanduser("~/data/")
 metadata_dir = get(ENV, "HYPERSTARS_METADATA_DIR", DEFAULT_METADATA_DIR)
 @info "Using base data directory" directory=dir_path
 @info "Using metadata directory" directory=metadata_dir
