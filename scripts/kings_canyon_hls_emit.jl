@@ -14,11 +14,12 @@ using Plots
 using Glob
 using Missings
 using Logging
+using Revise
 using HyperSTARS ## Pkg.add("https://github.com/STARS-Data-Fusion/HyperSTARS.jl") 
 
 # Rasters.checkmem!(false)
-# addprocs(8)
-addprocs(Sys.CPU_THREADS - 1) ## workers (using Distributed package), Check how this automatic detection works on gattaca
+addprocs(8)
+# addprocs(Sys.CPU_THREADS - 1) ## workers (using Distributed package), Check how this automatic detection works on gattaca
 
 @everywhere using HyperSTARS
 
@@ -372,7 +373,7 @@ function write_multiband_geotiff(path::String, data::AbstractArray{<:Real,3}, or
     dy = Float64(cell_size[2])
     geotransform = [x0, dx, 0.0, y0, 0.0, dy]
 
-    ArchGDAL.create(path; driver=ArchGDAL.getdriver("GTiff"), width=nx, height=ny, nbands=nbands, dtype=Float32, options=["COMPRESS=LZW"]) do ds
+    ArchGDAL.create(path; driver=ArchGDAL.getdriver("GTiff"), width=ny, height=nx, nbands=nbands, dtype=Float32, options=["COMPRESS=LZW"]) do ds
         ArchGDAL.setgeotransform!(ds, geotransform)
         if !isempty(proj_wkt)
             ArchGDAL.setproj!(ds, proj_wkt)
@@ -383,16 +384,13 @@ function write_multiband_geotiff(path::String, data::AbstractArray{<:Real,3}, or
     end
 end
 
-
-
-
 #### Target fusion date range
 date_range = [TARGET_START_DATE, TARGET_END_DATE]
 @info "Configured target date range" start_date=date_range[1] end_date=date_range[2]
 
 #### parent directory
-# dir_path = "/Users/maggiej/Documents/Hyperspectral_DataFusion/Data/KingsCanyon/"
-dir_path = expanduser("~/data/")
+dir_path = "/Users/maggiej/Documents/Hyperspectral_DataFusion/Data/ArrowPeak/"
+# dir_path = expanduser("~/data/")
 metadata_dir = get(ENV, "HYPERSTARS_METADATA_DIR", DEFAULT_METADATA_DIR)
 @info "Using base data directory" directory=dir_path
 @info "Using metadata directory" directory=metadata_dir
@@ -460,6 +458,9 @@ target_times = eachindex(all_dates)
             ar_phi=1.0,
             window_radius=100.0,
             use_progress_bar=false);
+
+rmprocs(workers())
+
 @info "Scene fusion complete" fused_size=size(fused_images) fused_sd_size=size(fused_sd_images)
 log_array_summary("Fused mean (all target times)", fused_images)
 log_array_summary("Fused sd (all target times)", fused_sd_images)
