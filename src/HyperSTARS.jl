@@ -614,7 +614,7 @@ function kalman_1D_filter_kr(Ht::AbstractArray{Float64},
 
     ################################
     # Explicitly symmetrize to avoid numerical precision issues
-    # P_new .= (P_new + P_new') ./ 2
+    P_new .= (P_new + P_new') ./ 2
 
     return x_new, P_new
 end
@@ -1285,10 +1285,13 @@ function hyperSTARS_fusion_kr_dict(d,
             kt = measurements[x].dates .== t2
             yss = @views measurements[x].data[:,:,kt]
             ym = .!vec(any(isnan, yss; dims=2))
-            Hs2 = Hss[x][ym,:]
+
+            # find rows that have at least one nonzero
+            nonzero_rows = sort(unique(Hss[x].rowval))
+            Hs2 = Hss[x][ym[nonzero_rows],:]
 
             push!(Ms, HyperSTARS.HSModel(Hws[x], Hs2, Diagonal(measurements[x].uq[:,kt][:]), 1.0*I(size(Hs2,1)), Qf, F))
-            push!(ys,yss[ym,:] .- Hms[x]' .- measurements[x].bias[:,kt]');
+            push!(ys,yss[ym[nonzero_rows],:] .- Hms[x]' .- measurements[x].bias[:,kt]');
         end
 
         if length(ys) == 0
@@ -1307,12 +1310,14 @@ function hyperSTARS_fusion_kr_dict(d,
         mul!(FPpred, F, @view(filtering_covs[:,:,t]))
         mul!(P_pred, FPpred, F', 1.0, 1.0)
 
+        P_pred .= (P_pred .+ P_pred') ./ 2
         predicted_means[:,t] = x_pred
         predicted_covs[:,:,t] = P_pred
 
         # Filtering is done here
         if Nobs == 0
-        # if length(ys) == 0
+            P_pred += 1e-10 * I ## regularize
+            
             filtering_means[:,t+1] = x_pred
             filtering_covs[:,:,t+1] = P_pred
             filtering_prec[:,t+1] = 1.0 ./ sqrt.(diag(P_pred))
@@ -1494,6 +1499,7 @@ function hyperSTARS_1D_fusion_kr_dict(d,
         mul!(FPpred, F, @view(filtering_covs[:,:,t]))
         mul!(P_pred, FPpred, F', 1.0, 1.0)
 
+        P_pred .= (P_pred.+ P_pred') ./ 2
         predicted_means[:,t] = x_pred
         predicted_covs[:,:,t] = P_pred
 
@@ -1504,7 +1510,7 @@ function hyperSTARS_1D_fusion_kr_dict(d,
             filtering_prec[:,t+1] = 1.0 ./ sqrt.(diag(P_pred))
         else
             x_new, P_new = kalman_1D_filter_kr(Hs, ys, vs, x_pred, P_pred)
-            
+
             filtering_means[:,t+1] = x_new
             filtering_covs[:,:,t+1] = P_new
             filtering_prec[:,t+1] = 1.0 ./ sqrt.(diag(P_new))
@@ -1743,9 +1749,13 @@ function scene_fusion_pmap(inst_data::AbstractVector{InstrumentData},
         full_ext = merge_extents(all_exts, sign.(target_csize))
         target_ij = find_all_ij_ext(window_bbox[1,:], window_bbox[2,:], target_origin, target_csize, target_ndims; inclusive=false)
         ss_ij = find_all_ij_ext(buffer_ext[1,:], buffer_ext[2,:], target_origin, target_csize, target_ndims)
-        if any(res_flag .== 2)
-            ss_ij = unique(vcat(ss_ij, sobol_bau_ij(full_ext[1,:], full_ext[2,:], target_origin, target_csize, target_ndims; nsamp=nsamp)),dims=1)
-        end
+        # if any(res_flag .== 2)
+        #     ss_ij = unique(vcat(ss_ij, sobol_bau_ij(full_ext[1,:], full_ext[2,:], target_origin, target_csize, target_ndims; nsamp=nsamp)),dims=1)
+        # end
+
+        ## always subsample, captures larger length-scales within window radius
+        ss_ij = unique(vcat(ss_ij, sobol_bau_ij(full_ext[1,:], full_ext[2,:], target_origin, target_csize, target_ndims; nsamp=nsamp)),dims=1)
+
         ss_xy = get_sij_from_ij(ss_ij, target_origin, target_csize)
         measurements, ss_ij = organize_data(full_ext, inst_geodata, inst_data, target_geodata, ss_xy, ss_ij, res_flag)
         bau_ij = unique(vcat(target_ij, ss_ij),dims=1)
@@ -1893,9 +1903,13 @@ function scene_inds_fusion_pmap(inst_data::AbstractVector{InstrumentData},
         full_ext = merge_extents(all_exts, sign.(target_csize))
         target_ij = find_all_ij_ext(window_bbox[1,:], window_bbox[2,:], target_origin, target_csize, target_ndims; inclusive=false)
         ss_ij = find_all_ij_ext(buffer_ext[1,:], buffer_ext[2,:], target_origin, target_csize, target_ndims)
-        if any(res_flag .== 2)
-            ss_ij = unique(vcat(ss_ij, sobol_bau_ij(full_ext[1,:], full_ext[2,:], target_origin, target_csize, target_ndims; nsamp=nsamp)),dims=1)
-        end
+        # if any(res_flag .== 2)
+        #     ss_ij = unique(vcat(ss_ij, sobol_bau_ij(full_ext[1,:], full_ext[2,:], target_origin, target_csize, target_ndims; nsamp=nsamp)),dims=1)
+        # end
+
+        ## always subsample, captures larger length-scales within window radius
+        ss_ij = unique(vcat(ss_ij, sobol_bau_ij(full_ext[1,:], full_ext[2,:], target_origin, target_csize, target_ndims; nsamp=nsamp)),dims=1)
+
         ss_xy = get_sij_from_ij(ss_ij, target_origin, target_csize)
         measurements, ss_ij = organize_data(full_ext, inst_geodata, inst_data, target_geodata, ss_xy, ss_ij, res_flag)
         bau_ij = unique(vcat(target_ij, ss_ij),dims=1)
@@ -2001,9 +2015,13 @@ function scene_inds_1D_fusion_pmap(inst_data::AbstractVector{InstrumentData},
         full_ext = merge_extents(all_exts, sign.(target_csize))
         target_ij = find_all_ij_ext(window_bbox[1,:], window_bbox[2,:], target_origin, target_csize, target_ndims; inclusive=false)
         ss_ij = find_all_ij_ext(buffer_ext[1,:], buffer_ext[2,:], target_origin, target_csize, target_ndims)
-        if any(res_flag .== 2)
-            ss_ij = unique(vcat(ss_ij, sobol_bau_ij(full_ext[1,:], full_ext[2,:], target_origin, target_csize, target_ndims; nsamp=nsamp)),dims=1)
-        end
+       # if any(res_flag .== 2)
+        #     ss_ij = unique(vcat(ss_ij, sobol_bau_ij(full_ext[1,:], full_ext[2,:], target_origin, target_csize, target_ndims; nsamp=nsamp)),dims=1)
+        # end
+
+        ## always subsample, captures larger length-scales within window radius
+        ss_ij = unique(vcat(ss_ij, sobol_bau_ij(full_ext[1,:], full_ext[2,:], target_origin, target_csize, target_ndims; nsamp=nsamp)),dims=1)
+
         ss_xy = get_sij_from_ij(ss_ij, target_origin, target_csize)
         measurements, ss_ij = organize_data(full_ext, inst_geodata, inst_data, target_geodata, ss_xy, ss_ij, res_flag)
         bau_ij = unique(vcat(target_ij, ss_ij),dims=1)
