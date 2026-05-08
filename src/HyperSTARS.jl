@@ -1287,7 +1287,9 @@ function hyperSTARS_fusion_kr_dict(d,
             ym = .!vec(any(isnan, yss; dims=2))
 
             # find rows that have at least one nonzero
-            nonzero_rows = sort(unique(Hss[x].rowval))
+            # nonzero_rows = sort(unique(Hss[x].rowval))
+            nonzero_rows = mean(isnan.(o1), dims=2)[:] .== 0
+
             Hs2 = Hss[x][ym[nonzero_rows],:]
 
             push!(Ms, HyperSTARS.HSModel(Hws[x], Hs2, Diagonal(measurements[x].uq[:,kt][:]), 1.0*I(size(Hs2,1)), Qf, F))
