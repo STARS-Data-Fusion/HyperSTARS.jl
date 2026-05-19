@@ -1,6 +1,7 @@
 using Interpolations # For interpolation methods, especially in RSR conversion
 using Distances # For calculating pairwise distances (e.g., Euclidean, Squared Euclidean)
 using LinearAlgebra # For basic linear algebra operations like identity matrix
+using SparseArrays
 
 """
     unif_weighted_obs_operator_centroid(sensor, target, sensor_res)
@@ -322,14 +323,15 @@ function compute_gaussian_psf(lat0, lon0, lats, lons, fwhm_along, fwhm_across, �
     return psf
 end
 
-function compute_gaussian_psf_matrix(pace_coords, ref_coords, fwhm, φ)
+function compute_gaussian_psf_matrix(pace_coords, ref_coords, fwhm)
     # pace_coords: n_pace x 2 (lon, lat)
     # ref_coords:  n_ref  x 2 (lon, lat)
     # fwhm:        2-vec [fwhm_along, fwhm_across]
     
     sigma_along  = fwhm[1] / 2.3548
     sigma_across = fwhm[2] / 2.3548
-    
+    φ = fwhm[3]
+
     # Broadcast: n_pace x n_ref
     dx = ref_coords[:, 1]' .- pace_coords[:, 1]  # lon offsets
     dy = ref_coords[:, 2]' .- pace_coords[:, 2]  # lat offsets
@@ -345,12 +347,11 @@ function compute_gaussian_psf_matrix(pace_coords, ref_coords, fwhm, φ)
     return W
 end
 
-using SparseArrays
-
-function compute_gaussian_psf_sparse_matrix(pace_coords, ref_coords, fwhm, φ; n_sigma=4)
+function compute_gaussian_psf_sparse_matrix(pace_coords, ref_coords, fwhm; n_sigma=3)
     sigma_along  = fwhm[1] / 2.3548
     sigma_across = fwhm[2] / 2.3548
-    
+    φ = fwhm[3]
+
     n_pace = size(pace_coords, 1)
     n_ref  = size(ref_coords, 1)
     

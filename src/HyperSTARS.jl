@@ -2071,10 +2071,11 @@ struct SwathData
     data::AbstractVector{AbstractArray} # length T vector of (n x w)
     bias::AbstractVector{Union{Any,AbstractArray}} # length T vector of W error biases 
     uq::AbstractVector{Union{Any,AbstractArray}} # length T vector of W error variances 
-    spatial_resolution::AbstractVector # [rx,ry] vector of spatial resolution 
+    fwhm::AbstractVector{AbstractVector} # length T vector of [rx,ry] vector of fwhm of psf
     dates::AbstractVector # vector of dates
     coords::AbstractVector{AbstractArray} # length T vector of n x 2 array of spatial coordinates
     wavelengths::AbstractVector # w vector of spectral wavelengths
+    psf::Function
     rsr::Union{Dict,Any,AbstractArray} # Dict{w: wavelengths, rsr:rsr values} for discrete weights and wavelengths, or scalar common fwhm, or w length vector of fwhms
 end
 
@@ -2085,7 +2086,6 @@ function hyperSTARS_swath_fusion_kr_dict(d,
                 target_times::Union{AbstractVector{<:Real}, UnitRange{<:Real}} = [1],
                 smooth::Bool = false,
                 spatial_mod::Function = mat32_corD,                                         
-                obs_operator::Function = unif_weighted_obs_operator,
                 state_in_cov::Bool = true,
                 cov_wt::Real = 0.3,
                 tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
@@ -2213,7 +2213,7 @@ function hyperSTARS_swath_fusion_kr_dict(d,
                 yss = @views x.data[kt]
                 # ym = .!vec(any(isnan, yss; dims=2)) ## assumes already screened for NAs
                 ## build spatial observation operator
-                o1 = obs_operator(x.coords[kt], target_coords, x.spatial_resolution) # kwargs for uniform needs :target_resolution, # kwargs for gaussian needs :scale, :p
+                o1 = x.psf(x.coords[kt], target_coords, x.fwhm[kt]) # 
                 
                 # find rows that have at least one nonzero, meaning throw out observations that aren't covering any BAUs
                 # nonzero_rows = sort(unique(o1.rowval))
@@ -2301,7 +2301,6 @@ function swath_fusion_pmap(inst_data::AbstractVector{SwathData},
                       target_times::Union{AbstractVector{<:Real}, UnitRange{<:Real}} = [1], 
                       smooth::Bool = false,           
                       spatial_mod::Function = mat32_corD,                                           
-                      obs_operator::Function = unif_weighted_obs_operator,
                       state_in_cov::Bool = true,
                       cov_wt::Real = 0.3,
                       tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
@@ -2335,10 +2334,11 @@ function swath_fusion_pmap(inst_data::AbstractVector{SwathData},
             measurements[i] = SwathData(ys,
                                 inst_data[i].bias, 
                                 inst_data[i].uq, 
-                                abs.(inst_data[i].spatial_resolution), # Absolute cell size for resolution
+                                inst_data[i].fwhm,
                                 inst_data[i].dates,
                                 sp_coords,
                                 inst_data[i].wavelengths,
+                                inst_data[i].psf,
                                 inst_data[i].rsr)
         end
 
@@ -2363,7 +2363,7 @@ function swath_fusion_pmap(inst_data::AbstractVector{SwathData},
     result = @showprogress pmap(x -> hyperSTARS_swath_fusion_kr_dict(x,  
                     target_waves, spectral_mean, B,
                     target_times, smooth, spatial_mod, 
-                    obs_operator, state_in_cov, cov_wt, tscov_pars, ar_phi) , T );
+                    state_in_cov, cov_wt, tscov_pars, ar_phi) , T );
     
     # Reconstruct the full fused image and standard deviation image from the results
     # obtained from each individual window.
