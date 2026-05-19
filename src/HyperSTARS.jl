@@ -19,14 +19,17 @@ export organize_data
 export scene_fusion_pmap
 export scene_inds_fusion_pmap
 export scene_inds_1D_fusion_pmap
+export swath_fusion_pmap
 export create_data_dicts
 export hyperSTARS_fusion_kr_dict
+export hyperSTARS_swath_fusion_kr_dict
 export woodbury_filter_kr
 export woodbury_filter_kr!
 export smooth_series
 
 export InstrumentData
 export InstrumentGeoData
+export SwathData
 
 export cell_size # Assuming this is defined in spatial_utils_ll.jl and re-exported
 export get_centroid_origin_raster # Assuming this is defined in spatial_utils_ll.jl and re-exported
@@ -2062,5 +2065,320 @@ function scene_inds_1D_fusion_pmap(inst_data::AbstractVector{InstrumentData},
     return fused_image, fused_sd_image
 
 end
+
+###### Data Fusion Functions
+struct SwathData
+    data::AbstractVector{AbstractArray} # length T vector of (n x w)
+    bias::AbstractVector{Union{Any,AbstractArray}} # length T vector of W error biases 
+    uq::AbstractVector{Union{Any,AbstractArray}} # length T vector of W error variances 
+    spatial_resolution::AbstractVector # [rx,ry] vector of spatial resolution 
+    dates::AbstractVector # vector of dates
+    coords::AbstractVector{AbstractArray} # length T vector of n x 2 array of spatial coordinates
+    wavelengths::AbstractVector # w vector of spectral wavelengths
+    rsr::Union{Dict,Any,AbstractArray} # Dict{w: wavelengths, rsr:rsr values} for discrete weights and wavelengths, or scalar common fwhm, or w length vector of fwhms
+end
+
+function hyperSTARS_swath_fusion_kr_dict(d,  
+                target_wavelengths::AbstractVector{<:Real},
+                spectral_mean::AbstractVector{<:Real},   
+                B::AbstractArray{<:Real},
+                target_times::Union{AbstractVector{<:Real}, UnitRange{<:Real}} = [1],
+                smooth::Bool = false,
+                spatial_mod::Function = mat32_corD,                                         
+                obs_operator::Function = unif_weighted_obs_operator,
+                state_in_cov::Bool = true,
+                cov_wt::Real = 0.3,
+                tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
+                ar_phi = 1.0,
+                tscov_lag = 7) 
+
+
+    measurements = @views d[:measurements]
+    target_coords = @views d[:target_coords]
+    bau_ci = @views d[:bau_ci]
+    kp_ij = @views d[:kp_ij]
+    prior_mean = @views d[:prior_mean]
+    prior_var = @views d[:prior_var]
+    model_pars = @views d[:model_pars]
+
+
+    bau_kp = findall(c -> c[1] ∈ kp_ij[1] && c[2] ∈ kp_ij[2], bau_ci)
+    # sorted_order = sortperm(bau_kp, by = i -> (bau_ci[i][1], bau_ci[i][2]))
+    nbau = length(bau_kp)
+
+    ni = size(measurements)[1] # number of instruments
+    nf = size(target_coords)[1] # number of target resolution grid cells
+
+    p = size(B)[2]
+    t0v = Vector{Int64}(undef, ni)
+    ttv = Vector{Int64}(undef, ni)
+
+    for i in 1:ni
+        t0v[i] = measurements[i].dates[1]
+        ttv[i] = measurements[i].dates[end]
+    end
+
+    t0 = minimum(t0v)
+    tt = maximum(ttv)
+    tp = maximum(target_times);
+    tpl = minimum(target_times)
+
+    if smooth
+        times = minimum([t0,tpl]):maximum([tt,tp])
+    else
+        times = minimum([t0,tpl]):tp
+    end
+
+    nsteps = size(times)[1]
+
+    ## build spectral observation operator
+    Hws = Vector(undef,ni)
+    Hms = Vector(undef,ni)
+
+    for (i,x) in enumerate(measurements)
+        Hw = rsr_conv_matrix(x.rsr, x.wavelengths, target_wavelengths)
+        Hws[i] = Hw*B
+        Hms[i] = Hw*spectral_mean  
+    end
+
+    n = nf*p 
+
+    Q = zeros(n,n)
+
+    # Qs = Vector{Matrix{Float64}}(undef,size(model_pars)[1])
+    dd = pairwise(Distances.Euclidean(1e-12), target_coords, dims=1)
+    for (i,x) in enumerate(eachrow(model_pars))
+        ids = ((i-1)*nf+1):i*nf
+        @views Q[ids,ids] = x[1] .* spatial_mod(dd, x[2:end]) 
+    end
+
+    ## Diagonal transition matrices
+    F = UniformScaling(ar_phi)
+
+    filtering_means = zeros(n,nsteps+1)
+    filtering_covs = zeros(n,n,nsteps+1)
+    filtering_prec = zeros(n,nsteps+1)
+
+    predicted_means = zeros(n,nsteps)
+    predicted_covs = zeros(n,n,nsteps)
+
+    @views filtering_means[:,1] = prior_mean
+    @views filtering_covs[:,:,1] = Diagonal(prior_var)
+    @views filtering_prec[:,1] = 1.0 ./ sqrt.(prior_var)
+
+
+    ## update to back projection
+    nw = size(B,1) # number of target wavelengths
+    fused_image = zeros(nbau,nw,size(target_times,1))
+    fused_sd_image = zeros(nbau,nw,size(target_times,1))
+
+    kp_times = findall(times .∈ Ref(target_times))
+
+    x_pred = zeros(n)
+    P_pred = zeros(n,n)
+    x_new = zeros(n)
+    P_new = zeros(n,n)
+
+    FPpred = similar(P_pred)
+
+    Qf = zeros(n,n)
+ 
+    ## bunch of reusable memory in here...
+    for (t,t2) in enumerate(times)
+        Qf .= Q
+
+        if state_in_cov 
+            h = minimum([t-1, tscov_lag])
+            Qf .*= cov_wt
+
+            Xtt = reshape(filtering_means[:,t-h:t], (nf,p,h+1))[:,:,:]
+            Wt = @views reshape(filtering_prec[:,t-h:t], (nf,p,h+1))
+
+            Xtt .*= Wt
+            Xtt ./= sum(Wt, dims=3)
+
+            for (i,x) in enumerate(tscov_pars)
+                ids = ((i-1)*nf+1):i*nf
+                x2 = [model_pars[i,1], x]
+                @views Qf[ids,ids] .+= state_cov(Xtt[:,i,:]',x2) .* (1.0 .- cov_wt)
+            end
+
+        end
+
+        Ms = HyperSTARS.HSModel[]
+
+        ys = Vector{Array{Float64}}()
+        for (i,x) in enumerate(measurements)
+            for kt in findall(x.dates .== t2)
+                yss = @views x.data[kt]
+                # ym = .!vec(any(isnan, yss; dims=2)) ## assumes already screened for NAs
+                ## build spatial observation operator
+                o1 = obs_operator(x.coords[kt], target_coords, x.spatial_resolution) # kwargs for uniform needs :target_resolution, # kwargs for gaussian needs :scale, :p
+                
+                # find rows that have at least one nonzero, meaning throw out observations that aren't covering any BAUs
+                # nonzero_rows = sort(unique(o1.rowval))
+                nonzero_rows = mean(isnan.(o1), dims=2)[:] .== 0
+
+                o2 = o1[nonzero_rows,:]
+
+                push!(Ms, HyperSTARS.HSModel(Hws[i], o2, Diagonal(x.uq[kt][:]), 1.0*I(size(o2,1)), Qf, F))
+                push!(ys,yss[nonzero_rows,:] .- Hms[i]' .- x.bias[kt]');
+            end
+        end
+
+        if length(ys) == 0
+            Nobs = 0
+        else
+            Nobs = sum(size(x.Hs,1)*size(x.Hw,1) for x in Ms)
+        end
+        
+        Np = size(Qf,1)
+
+        # Predictive mean and covariance here
+        # x_pred = F * filtering_means[:,t] # filtering_means[1], covs[1] is prior mean
+        # P_pred = F * filtering_covs[:,:,t] * F' + Qf
+        P_pred .= Qf
+        mul!(x_pred, F, @view(filtering_means[:,t]))
+        mul!(FPpred, F, @view(filtering_covs[:,:,t]))
+        mul!(P_pred, FPpred, F', 1.0, 1.0)
+
+        P_pred .= (P_pred .+ P_pred') ./ 2
+        predicted_means[:,t] = x_pred
+        predicted_covs[:,:,t] = P_pred
+
+        # Filtering is done here
+        if Nobs == 0
+            P_pred += 1e-10 * I ## regularize
+            
+            filtering_means[:,t+1] = x_pred
+            filtering_covs[:,:,t+1] = P_pred
+            filtering_prec[:,t+1] = 1.0 ./ sqrt.(diag(P_pred))
+        else
+            if Nobs > Np ## scale by a factor here?
+                # println("Woodbury Form")
+                x_new, P_new = woodbury_filter_kr(Ms, ys, x_pred, P_pred)
+            else 
+                # println("Standard Form")
+                x_new, P_new = kalman_filter_kr(Ms, ys, x_pred, P_pred)
+            end
+
+            filtering_means[:,t+1] = x_new
+            filtering_covs[:,:,t+1] = P_new
+            filtering_prec[:,t+1] = 1.0 ./ sqrt.(diag(P_new))
+        end
+    end
+
+    ## update with back projection
+    if smooth
+        st = minimum(kp_times)
+        smoothed_means, smoothed_covs = smooth_series(F, predicted_means[:,st:end], predicted_covs[:,:,st:end], filtering_means[:,st:end], filtering_covs[:,:,st:end])
+        for (ti,t2) in enumerate(kp_times .- st .+ 1)
+            fused_image[:,:,ti] = @views reshape(smoothed_means[:,t2],(nf,p))[bau_kp,:] * B' .+ spectral_mean' ## back project to spectral domain
+            Σ = @views smoothed_covs[:,:,t2]
+            fused_sd_image[:,:,ti] = sqrt.(diag_cov_XB(Σ, B', nf, p, nw)[bau_kp,:])
+        end
+    else
+        for (ti,t2) in enumerate(kp_times)
+            fused_image[:,:,ti] = @views reshape(filtering_means[:,t2+1],(nf,p))[bau_kp,:] * B' .+ spectral_mean' ## back project to spectral domain
+            Σ = @views filtering_covs[:,:,t2+1]
+            fused_sd_image[:,:,ti] = sqrt.(diag_cov_XB(Σ, B', nf, p, nw)[bau_kp,:])
+        end
+    end 
+    return kp_ij, fused_image, fused_sd_image   
+end
+
+function swath_fusion_pmap(inst_data::AbstractVector{SwathData},
+                      target_geodata::InstrumentGeoData,
+                      target_coords::AbstractArray{<:Real},
+                      target_bau_ids::AbstractVector,
+                      window_inst_ids::AbstractVector,
+                      window_bau_ids::AbstractVector,
+                      spectral_mean::AbstractVector{<:Real},
+                      prior_mean::AbstractArray{<:Real},
+                      prior_var::AbstractArray{<:Real},
+                      B::AbstractArray{<:Real},
+                      model_pars;
+                      target_times::Union{AbstractVector{<:Real}, UnitRange{<:Real}} = [1], 
+                      smooth::Bool = false,           
+                      spatial_mod::Function = mat32_corD,                                           
+                      obs_operator::Function = unif_weighted_obs_operator,
+                      state_in_cov::Bool = true,
+                      cov_wt::Real = 0.3,
+                      tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
+                      ar_phi::Real = 1.0)
+
+    ### Define target extent and target + buffer extent
+    # Extract geospatial parameters for target grid
+    target_waves = @views target_geodata.wavelengths
+    target_ndims = @views target_geodata.ndims # Dimensions of the overall target grid
+
+    ni = length(inst_data) # Total number of instruments
+    nsteps = size(target_times)[1] # Number of target time steps for output
+    nw = size(target_waves)[1]
+    # Pre-allocate arrays for the final fused image and its standard deviation across the entire scene.
+    # Dimensions: (target_x, target_y, latent_spectral_components, time_steps)
+    fused_image = zeros(target_ndims[1], target_ndims[2], nw, nsteps);
+    fused_sd_image = zeros(target_ndims[1], target_ndims[2], nw, nsteps);
+    
+    nr = length(window_bau_ids) # Total number of spatial windows
+
+    # Prepare input dictionaries for each spatial window.
+    # use KDTree to do without assuming grid structure...
+    ci = CartesianIndices(Tuple(target_ndims))
+
+    T = []
+    for ii in 1:nr
+        measurements = Vector{SwathData}(undef, ni)
+        for i in 1:ni
+            ys = [inst_data[i].data[t][x[ii],:] for (t,x) in enumerate(window_inst_ids[i])]
+            sp_coords = [inst_data[i].coords[t][x[ii],:] for (t,x) in enumerate(window_inst_ids[i])]
+            measurements[i] = SwathData(ys,
+                                inst_data[i].bias, 
+                                inst_data[i].uq, 
+                                abs.(inst_data[i].spatial_resolution), # Absolute cell size for resolution
+                                inst_data[i].dates,
+                                sp_coords,
+                                inst_data[i].wavelengths,
+                                inst_data[i].rsr)
+        end
+
+        bau_coords = target_coords[sort(window_bau_ids[ii]),:]
+        bau_ci = ci[sort(window_bau_ids[ii])]
+        prior_mean_sub = @views prior_mean[bau_ci,:][:]
+        prior_var_sub = @views prior_var[bau_ci,:][:]
+
+        d = Dict()
+        d[:measurements] = measurements
+        d[:target_coords] = bau_coords
+        d[:bau_ci] = bau_ci
+        d[:kp_ij] = target_bau_ids[ii]
+        d[:prior_mean] = prior_mean_sub
+        d[:prior_var] = prior_var_sub
+        d[:model_pars] = @views model_pars[ii]
+        push!(T,d)
+    end
+
+    # Perform parallel fusion using `pmap`. Each element of `T` (a dictionary for one window)
+    # is processed by `hyperSTARS_fusion_kr_dict`. `pmap` distributes these tasks.
+    result = @showprogress pmap(x -> hyperSTARS_swath_fusion_kr_dict(x,  
+                    target_waves, spectral_mean, B,
+                    target_times, smooth, spatial_mod, 
+                    obs_operator, state_in_cov, cov_wt, tscov_pars, ar_phi) , T );
+    
+    # Reconstruct the full fused image and standard deviation image from the results
+    # obtained from each individual window.
+
+    for i in 1:nr
+        # `result[i][1]` contains `kp_ij` (Cartesian indices of the target BAUs for window `i`).
+        # `result[i][2]` contains `fused_image` for window `i`.
+        # `result[i][3]` contains `fused_sd_image` for window `i`.
+
+        kp_ij = result[i][1]
+        @views fused_image[result[i][1]...,:,:] = reshape(result[i][2], length(kp_ij[1]), length(kp_ij[2]), nw, nsteps) 
+        @views fused_sd_image[result[i][1]...,:,:] = reshape(result[i][3], length(kp_ij[1]), length(kp_ij[2]), nw, nsteps) 
+    end
+    return fused_image, fused_sd_image
+end
+
 
 end # end of module
