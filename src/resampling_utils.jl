@@ -300,3 +300,87 @@ function rsr_conv_matrix(rsr::Dict, inst_waves::AbstractVector{<:Real}, target_w
   
     return Ks
 end
+
+function compute_gaussian_psf(lat0, lon0, lats, lons, fwhm_along, fwhm_across, φ)
+    # Offsets in degrees
+    dx = Float64.(lons) .- lon0  # lon offset
+    dy = Float64.(lats) .- lat0  # lat offset
+    
+    # Rotate into along/across track frame
+    x_prime = dx .* sin(φ) .+ dy .* cos(φ)   # along-track
+    y_prime = dx .* cos(φ) .- dy .* sin(φ)   # across-track
+    
+    # Gaussian PSF
+    sigma_along  = fwhm_along  / 2.3548
+    sigma_across = fwhm_across / 2.3548
+    
+    psf = exp.(.-x_prime.^2 ./ (2*sigma_along^2) .- y_prime.^2 ./ (2*sigma_across^2))
+    
+    # Normalize
+    psf = psf ./ sum(skipmissing(psf))
+    
+    return psf
+end
+
+function compute_gaussian_psf_matrix(pace_coords, ref_coords, fwhm, φ)
+    # pace_coords: n_pace x 2 (lon, lat)
+    # ref_coords:  n_ref  x 2 (lon, lat)
+    # fwhm:        2-vec [fwhm_along, fwhm_across]
+    
+    sigma_along  = fwhm[1] / 2.3548
+    sigma_across = fwhm[2] / 2.3548
+    
+    # Broadcast: n_pace x n_ref
+    dx = ref_coords[:, 1]' .- pace_coords[:, 1]  # lon offsets
+    dy = ref_coords[:, 2]' .- pace_coords[:, 2]  # lat offsets
+    
+    x_prime = dx .* sin(φ) .+ dy .* cos(φ)
+    y_prime = dx .* cos(φ) .- dy .* sin(φ)
+    
+    W = exp.(.-x_prime.^2 ./ (2*sigma_along^2) .- y_prime.^2 ./ (2*sigma_across^2))
+    
+    # Normalize each row
+    W = W ./ sum(W, dims=2)
+    
+    return W
+end
+
+using SparseArrays
+
+function compute_gaussian_psf_sparse_matrix(pace_coords, ref_coords, fwhm, φ; n_sigma=4)
+    sigma_along  = fwhm[1] / 2.3548
+    sigma_across = fwhm[2] / 2.3548
+    
+    n_pace = size(pace_coords, 1)
+    n_ref  = size(ref_coords, 1)
+    
+    rows = Int[]
+    cols = Int[]
+    vals = Float64[]
+    
+    for k in 1:n_pace
+        dx = ref_coords[:, 1] .- pace_coords[k, 1]
+        dy = ref_coords[:, 2] .- pace_coords[k, 2]
+        
+        x_prime = dx .* sin(φ) .+ dy .* cos(φ)
+        y_prime = dx .* cos(φ) .- dy .* sin(φ)
+        
+        # Find indices within n_sigma
+        within = findall((abs.(x_prime) .<= n_sigma * sigma_along) .& 
+                         (abs.(y_prime) .<= n_sigma * sigma_across))
+        
+        if isempty(within)
+            continue
+        end
+        
+        psf = exp.(.-x_prime[within].^2 ./ (2*sigma_along^2) .- 
+                    y_prime[within].^2 ./ (2*sigma_across^2))
+        psf = psf ./ sum(psf)
+        
+        append!(rows, fill(k, length(within)))
+        append!(cols, within)
+        append!(vals, psf)
+    end
+    
+    return sparse(rows, cols, vals, n_pace, n_ref)
+end
