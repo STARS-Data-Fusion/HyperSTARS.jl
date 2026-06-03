@@ -1291,7 +1291,7 @@ function hyperSTARS_fusion_kr_dict(d,
 
             # find rows that have at least one nonzero
             # nonzero_rows = sort(unique(Hss[x].rowval))
-            nonzero_rows = mean(isnan.(o1), dims=2)[:] .== 0
+            nonzero_rows = mean(isnan.(Hss[x]), dims=2)[:] .== 0
 
             Hs2 = Hss[x][ym[nonzero_rows],:]
 
@@ -1754,12 +1754,12 @@ function scene_fusion_pmap(inst_data::AbstractVector{InstrumentData},
         full_ext = merge_extents(all_exts, sign.(target_csize))
         target_ij = find_all_ij_ext(window_bbox[1,:], window_bbox[2,:], target_origin, target_csize, target_ndims; inclusive=false)
         ss_ij = find_all_ij_ext(buffer_ext[1,:], buffer_ext[2,:], target_origin, target_csize, target_ndims)
-        # if any(res_flag .== 2)
-        #     ss_ij = unique(vcat(ss_ij, sobol_bau_ij(full_ext[1,:], full_ext[2,:], target_origin, target_csize, target_ndims; nsamp=nsamp)),dims=1)
-        # end
+        if any(res_flag .== 2)
+            ss_ij = unique(vcat(ss_ij, sobol_bau_ij(full_ext[1,:], full_ext[2,:], target_origin, target_csize, target_ndims; nsamp=nsamp)),dims=1)
+        end
 
         ## always subsample, captures larger length-scales within window radius
-        ss_ij = unique(vcat(ss_ij, sobol_bau_ij(full_ext[1,:], full_ext[2,:], target_origin, target_csize, target_ndims; nsamp=nsamp)),dims=1)
+        # ss_ij = unique(vcat(ss_ij, sobol_bau_ij(full_ext[1,:], full_ext[2,:], target_origin, target_csize, target_ndims; nsamp=nsamp)),dims=1)
 
         ss_xy = get_sij_from_ij(ss_ij, target_origin, target_csize)
         measurements, ss_ij = organize_data(full_ext, inst_geodata, inst_data, target_geodata, ss_xy, ss_ij, res_flag)
@@ -2076,6 +2076,7 @@ struct SwathData
     coords::AbstractVector{AbstractArray} # length T vector of n x 2 array of spatial coordinates
     wavelengths::AbstractVector # w vector of spectral wavelengths
     psf::Function
+    psf_samp::Bool
     rsr::Union{Dict,Any,AbstractArray} # Dict{w: wavelengths, rsr:rsr values} for discrete weights and wavelengths, or scalar common fwhm, or w length vector of fwhms
 end
 
@@ -2090,8 +2091,8 @@ function hyperSTARS_swath_fusion_kr_dict(d,
                 cov_wt::Real = 0.3,
                 tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
                 ar_phi = 1.0,
-                tscov_lag = 7) 
-
+                tscov_lag = 7,
+                mcvar = 0.0001) 
 
     measurements = @views d[:measurements]
     target_coords = @views d[:target_coords]
@@ -2100,7 +2101,7 @@ function hyperSTARS_swath_fusion_kr_dict(d,
     prior_mean = @views d[:prior_mean]
     prior_var = @views d[:prior_var]
     model_pars = @views d[:model_pars]
-
+    A_bau = prod(abs.(d[:bau_csize]))
 
     bau_kp = findall(c -> c[1] ∈ kp_ij[1] && c[2] ∈ kp_ij[2], bau_ci)
     # sorted_order = sortperm(bau_kp, by = i -> (bau_ci[i][1], bau_ci[i][2]))
@@ -2217,12 +2218,28 @@ function hyperSTARS_swath_fusion_kr_dict(d,
                 
                 # find rows that have at least one nonzero, meaning throw out observations that aren't covering any BAUs
                 # nonzero_rows = sort(unique(o1.rowval))
-                nonzero_rows = mean(isnan.(o1), dims=2)[:] .== 0
+                valid_rows = vec(mean(isnan.(o1), dims=2) .== 0) .& vec(sum(abs.(o1), dims=2) .!= 0)
 
-                o2 = o1[nonzero_rows,:]
+                o2 = o1[valid_rows,:]
+                yss_subset = yss[valid_rows, :]
 
-                push!(Ms, HyperSTARS.HSModel(Hws[i], o2, Diagonal(x.uq[kt][:]), 1.0*I(size(o2,1)), Qf, F))
-                push!(ys,yss[nonzero_rows,:] .- Hms[i]' .- x.bias[kt]');
+                if x.psf_samp
+                    norm_constant = 2π * prod(x.fwhm[kt][1:2]) / 2.3548^2
+                    for (row_idx,rr) in enumerate(eachrow(o2))
+                        o_row = @views o2[row_idx:row_idx, :]  # 1 x n matrix, preserves dimensions
+                        c = sum(o_row) * A_bau/norm_constant
+                        o_row_norm = o_row ./ sum(o_row)    
+                        push!(Ms, HyperSTARS.HSModel(Hws[i], o_row_norm, Diagonal(x.uq[kt][:] .+ ((1-c)^2 * mcvar)), 1.0*I(size(o_row,1)), Qf, F))
+                        push!(ys, yss_subset[row_idx:row_idx,:] .- Hms[i]' .- x.bias[kt]')                    end
+                else
+                    o2_norm = if !all(isapprox.(sum(o2, dims=2), 1.0, atol=1e-6))
+                        o2 ./ sum(o2, dims=2)
+                    else
+                        o2
+                    end
+                    push!(Ms, HyperSTARS.HSModel(Hws[i], o2_norm, Diagonal(x.uq[kt][:]), 1.0*I(size(o2,1)), Qf, F))
+                    push!(ys,yss_subset .- Hms[i]' .- x.bias[kt]');
+                end
             end
         end
 
@@ -2304,12 +2321,14 @@ function swath_fusion_pmap(inst_data::AbstractVector{SwathData},
                       state_in_cov::Bool = true,
                       cov_wt::Real = 0.3,
                       tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
-                      ar_phi::Real = 1.0)
+                      ar_phi::Real = 1.0,
+                      mcvar::Real = 1e-5)
 
     ### Define target extent and target + buffer extent
     # Extract geospatial parameters for target grid
     target_waves = @views target_geodata.wavelengths
     target_ndims = @views target_geodata.ndims # Dimensions of the overall target grid
+    bau_csize = target_geodata.cell_size ## size of baus
 
     ni = length(inst_data) # Total number of instruments
     nsteps = size(target_times)[1] # Number of target time steps for output
@@ -2339,6 +2358,7 @@ function swath_fusion_pmap(inst_data::AbstractVector{SwathData},
                                 sp_coords,
                                 inst_data[i].wavelengths,
                                 inst_data[i].psf,
+                                inst_data[i].psf_samp,
                                 inst_data[i].rsr)
         end
 
@@ -2355,6 +2375,7 @@ function swath_fusion_pmap(inst_data::AbstractVector{SwathData},
         d[:prior_mean] = prior_mean_sub
         d[:prior_var] = prior_var_sub
         d[:model_pars] = @views model_pars[ii]
+        d[:bau_csize] = bau_csize
         push!(T,d)
     end
 
@@ -2363,7 +2384,7 @@ function swath_fusion_pmap(inst_data::AbstractVector{SwathData},
     result = @showprogress pmap(x -> hyperSTARS_swath_fusion_kr_dict(x,  
                     target_waves, spectral_mean, B,
                     target_times, smooth, spatial_mod, 
-                    state_in_cov, cov_wt, tscov_pars, ar_phi) , T );
+                    state_in_cov, cov_wt, tscov_pars, ar_phi, mcvar) , T );
     
     # Reconstruct the full fused image and standard deviation image from the results
     # obtained from each individual window.

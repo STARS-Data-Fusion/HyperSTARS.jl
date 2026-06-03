@@ -323,6 +323,7 @@ function compute_gaussian_psf(lat0, lon0, lats, lons, fwhm_along, fwhm_across, �
     return psf
 end
 
+##### doesn't normalize!!!!!
 function compute_gaussian_psf_matrix(pace_coords, ref_coords, fwhm)
     # pace_coords: n_pace x 2 (lon, lat)
     # ref_coords:  n_ref  x 2 (lon, lat)
@@ -341,13 +342,16 @@ function compute_gaussian_psf_matrix(pace_coords, ref_coords, fwhm)
     
     W = exp.(.-x_prime.^2 ./ (2*sigma_along^2) .- y_prime.^2 ./ (2*sigma_across^2))
     
+    # norm_constant = 2π * sigma_along * sigma_across
+
     # Normalize each row
-    W = W ./ sum(W, dims=2)
-    
+    # W = W ./ sum(W, dims=2)
+    # W = W ./ norm_constant
     return W
 end
 
-function compute_gaussian_psf_sparse_matrix(pace_coords, ref_coords, fwhm; n_sigma=3)
+##### doesn't normalize!!!!!
+function compute_gaussian_psf_sparse_matrix(pace_coords, ref_coords, fwhm; n_sigma=3) 
     sigma_along  = fwhm[1] / 2.3548
     sigma_across = fwhm[2] / 2.3548
     φ = fwhm[3]
@@ -359,6 +363,8 @@ function compute_gaussian_psf_sparse_matrix(pace_coords, ref_coords, fwhm; n_sig
     cols = Int[]
     vals = Float64[]
     
+    # norm_constant =  2π * sigma_along * sigma_across 
+
     for k in 1:n_pace
         dx = ref_coords[:, 1] .- pace_coords[k, 1]
         dy = ref_coords[:, 2] .- pace_coords[k, 2]
@@ -376,8 +382,8 @@ function compute_gaussian_psf_sparse_matrix(pace_coords, ref_coords, fwhm; n_sig
         
         psf = exp.(.-x_prime[within].^2 ./ (2*sigma_along^2) .- 
                     y_prime[within].^2 ./ (2*sigma_across^2))
-        psf = psf ./ sum(psf)
-        
+        # psf = psf ./ sum(psf)
+        # psf = psf ./ norm_constant 
         append!(rows, fill(k, length(within)))
         append!(cols, within)
         append!(vals, psf)
