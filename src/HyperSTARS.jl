@@ -1150,6 +1150,8 @@ function hyperSTARS_fusion_kr_dict(d,
     prior_var = @views d[:prior_var]
     model_pars = @views d[:model_pars]
 
+    # println(size(prior_mean))
+
     nbau = size(kp_ij,1)
     ni = size(measurements)[1] 
     # println(ni)
@@ -1208,7 +1210,7 @@ function hyperSTARS_fusion_kr_dict(d,
     end
 
     ## Diagonal transition matrices
-    F = UniformScaling(ar_phi)
+    F = UniformScaling(ar_phi) ## need to update this for local level model
 
     # x0 = prior_mean[:] # don't need this but here to help with synergizing code later
     # P0 = Diagonal(prior_var[:]) # just assuming diagonal C0
@@ -1321,7 +1323,7 @@ function hyperSTARS_fusion_kr_dict(d,
 
         # Filtering is done here
         if Nobs == 0
-            P_pred += 1e-10 * I ## regularize
+            # P_pred += 1e-10 * I ## regularize
             
             filtering_means[:,t+1] = x_pred
             filtering_covs[:,:,t+1] = P_pred
@@ -1379,6 +1381,8 @@ function hyperSTARS_1D_fusion_kr_dict(d,
     prior_mean = @views d[:prior_mean]
     prior_var = @views d[:prior_var]
     model_pars = @views d[:model_pars]
+
+
 
     nbau = size(kp_ij,1)
     ni = size(measurements)[1] 
@@ -2084,15 +2088,19 @@ function hyperSTARS_swath_fusion_kr_dict(d,
                 target_wavelengths::AbstractVector{<:Real},
                 spectral_mean::AbstractVector{<:Real},   
                 B::AbstractArray{<:Real},
+                G::AbstractArray{<:Real},
                 target_times::Union{AbstractVector{<:Real}, UnitRange{<:Real}} = [1],
                 smooth::Bool = false,
                 spatial_mod::Function = mat32_corD,                                         
                 state_in_cov::Bool = true,
                 cov_wt::Real = 0.3,
                 tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
-                ar_phi = 1.0,
                 tscov_lag = 7,
-                mcvar = 0.0001) 
+                mcvar = 1e-6) 
+
+    if size(G,2) != size(B,2)
+        throw(DimensionMismatch("size(G,2)=$(size(G,2)) does not match size(B,2)=$(size(B,2))"))
+    end
 
     measurements = @views d[:measurements]
     target_coords = @views d[:target_coords]
@@ -2154,7 +2162,11 @@ function hyperSTARS_swath_fusion_kr_dict(d,
     end
 
     ## Diagonal transition matrices
-    F = UniformScaling(ar_phi)
+    ## Transition matrix is kron(G, I(n,n))
+    # F = UniformScaling(ar_phi)
+    F = kron(sparse(G), sparse(I, nf,nf))
+
+    F = isdiag(F) ? Diagonal(diag(F)) : F
 
     filtering_means = zeros(n,nsteps+1)
     filtering_covs = zeros(n,n,nsteps+1)
@@ -2172,7 +2184,7 @@ function hyperSTARS_swath_fusion_kr_dict(d,
     nw = size(B,1) # number of target wavelengths
     fused_image = zeros(nbau,nw,size(target_times,1))
     fused_sd_image = zeros(nbau,nw,size(target_times,1))
-
+    
     kp_times = findall(times .∈ Ref(target_times))
 
     x_pred = zeros(n)
@@ -2230,7 +2242,8 @@ function hyperSTARS_swath_fusion_kr_dict(d,
                         c = sum(o_row) * A_bau/norm_constant
                         o_row_norm = o_row ./ sum(o_row)    
                         push!(Ms, HyperSTARS.HSModel(Hws[i], o_row_norm, Diagonal(x.uq[kt][:] .+ ((1-c)^2 * mcvar)), 1.0*I(size(o_row,1)), Qf, F))
-                        push!(ys, yss_subset[row_idx:row_idx,:] .- Hms[i]' .- x.bias[kt]')                    end
+                        push!(ys, yss_subset[row_idx:row_idx,:] .- Hms[i]' .- x.bias[kt]')                    
+                    end
                 else
                     o2_norm = if !all(isapprox.(sum(o2, dims=2), 1.0, atol=1e-6))
                         o2 ./ sum(o2, dims=2)
@@ -2254,10 +2267,17 @@ function hyperSTARS_swath_fusion_kr_dict(d,
         # Predictive mean and covariance here
         # x_pred = F * filtering_means[:,t] # filtering_means[1], covs[1] is prior mean
         # P_pred = F * filtering_covs[:,:,t] * F' + Qf
-        P_pred .= Qf
+        
+
         mul!(x_pred, F, @view(filtering_means[:,t]))
-        mul!(FPpred, F, @view(filtering_covs[:,:,t]))
-        mul!(P_pred, FPpred, F', 1.0, 1.0)
+        # P_pred .= Qf
+        # mul!(FPpred, F, @view(filtering_covs[:,:,t]))
+        # mul!(P_pred, FPpred, F', 1.0, 1.0)
+
+        ## faster when F is sparse?
+        mul!(FPpred, F, @view(filtering_covs[:,:,t]))   # FP = F*P, sparse*dense (cheap)
+        mul!(P_pred, F, FPpred')                          # F*(FP)' = F*P'*F' = F*P*F' since P symmetric
+        P_pred .+= Qf
 
         P_pred .= (P_pred .+ P_pred') ./ 2
         predicted_means[:,t] = x_pred
@@ -2314,6 +2334,7 @@ function swath_fusion_pmap(inst_data::AbstractVector{SwathData},
                       prior_mean::AbstractArray{<:Real},
                       prior_var::AbstractArray{<:Real},
                       B::AbstractArray{<:Real},
+                      G::AbstractArray{<:Real},
                       model_pars;
                       target_times::Union{AbstractVector{<:Real}, UnitRange{<:Real}} = [1], 
                       smooth::Bool = false,           
@@ -2321,8 +2342,15 @@ function swath_fusion_pmap(inst_data::AbstractVector{SwathData},
                       state_in_cov::Bool = true,
                       cov_wt::Real = 0.3,
                       tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
-                      ar_phi::Real = 1.0,
+                      tscov_lag::Int = 7,
                       mcvar::Real = 1e-5)
+
+
+    # print("updated")
+
+    if size(G,2) != size(B,2)
+        throw(DimensionMismatch("size(G,2)=$(size(G,2)) does not match size(B,2)=$(size(B,2))"))
+    end
 
     ### Define target extent and target + buffer extent
     # Extract geospatial parameters for target grid
@@ -2382,9 +2410,9 @@ function swath_fusion_pmap(inst_data::AbstractVector{SwathData},
     # Perform parallel fusion using `pmap`. Each element of `T` (a dictionary for one window)
     # is processed by `hyperSTARS_fusion_kr_dict`. `pmap` distributes these tasks.
     result = @showprogress pmap(x -> hyperSTARS_swath_fusion_kr_dict(x,  
-                    target_waves, spectral_mean, B,
+                    target_waves, spectral_mean, B, G,
                     target_times, smooth, spatial_mod, 
-                    state_in_cov, cov_wt, tscov_pars, ar_phi, mcvar) , T );
+                    state_in_cov, cov_wt, tscov_pars, tscov_lag, mcvar) , T );
     
     # Reconstruct the full fused image and standard deviation image from the results
     # obtained from each individual window.

@@ -536,7 +536,7 @@ pvar_vec = mean(result3[:,:,:,1], dims=[1,2])# rescale pc basis
 pvar = ones((target_ndims...,size(B)[2])) .* pvar_vec # prior var array (nx x ny x np)
 
 ## setting spatial variance parameters (not estimated in this demo and not spatially varying)
-model_pars = ones((nwindows...,size(B)[2],4)) .* reshape([0.1,300,1e-10,1.5], (1,1,1,4)) # covariance parameters (nx x ny x np x 4), last dimension is [spatial var, length scale, nugget, smoothness]
+model_pars = ones((nwindows...,size(B)[2],4)) .* reshape([0.1,100,1e-10,1.5], (1,1,1,4)) # covariance parameters (nx x ny x np x 4), last dimension is [spatial var, length scale, nugget, smoothness]
 # for (i,x) in enumerate(vrs)
 #     model_pars[:,:,i,1] .= x / 1000
 # end
@@ -547,7 +547,7 @@ model_pars[:,:,:,1] .= result3[:,:,:,1]
 @everywhere BLAS.set_num_threads(1)
 
 target_times = eachindex(all_dates)
-@info "Starting scene fusion" target_times=collect(target_times) nsamp=50 window_buffer=4
+@info "Starting scene fusion" target_times=collect(target_times) nsamp=25 window_buffer=4
 
 @time fused_images, fused_sd_images = scene_fusion_pmap(data30m_list,
             inst30m_geodata,
@@ -560,7 +560,7 @@ target_times = eachindex(all_dates)
             model_pars; 
             nsamp=25,
             window_buffer = 4,
-            target_times = target_times, 
+            target_times = 1:10, 
             smooth = false,           
             spatial_mod = exp_corD,                                           
             obs_operator = unif_weighted_obs_operator_centroid,
@@ -569,7 +569,7 @@ target_times = eachindex(all_dates)
             tscov_pars = sqrt.(pvar_vec[:]) ./ 10.0, 
             ar_phi=1.0,
             window_radius=500.0,
-            use_progress_bar=false);
+            use_progress_bar=true);
 
 rmprocs(workers())
 
