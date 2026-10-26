@@ -242,6 +242,108 @@ end
 
 # --- Kalman Filter and Smoothing Functions ---
 
+
+
+# function woodbury_filter_kr(Ms::AbstractVector{<:HSModel}, 
+#                             ys::AbstractVector{<:AbstractArray{Float64}}, 
+#                             x_pred::AbstractVector{Float64}, 
+#                             P_pred::AbstractArray{Float64}) 
+
+#     K = length(Ms) # Number of instruments/observation sources
+#     N = size(x_pred,1) # Total dimension of the state vector
+#     ns = size(Ms[1].Hs,2) # Number of spatial latent states
+#     nw = size(Ms[1].Hw,2) # Number of wavelength latent states (p in the calling function)
+
+#     # Pre-allocate matrices for accumulating terms
+#     HViH = zeros(N,N) # Accumulates H' * V_inv * H terms
+#     HVie = zeros(N) # Accumulates H' * V_inv * innovation terms
+#     x_new = ones(N) # Filtered state mean
+#     P_new = zeros(N,N) # Filtered state covariance
+#     F = zeros(N,N) # Intermediate matrix for Woodbury identity
+
+#     # Reshape the predicted state mean for easier matrix multiplication with H_spatial and H_wavelength
+#     x_predr = reshape(x_pred, (ns,nw))
+
+#     # Iterate through each instrument to accumulate terms for the Kalman update
+#     for i in 1:K
+#         Hw = @views Ms[i].Hw # Wavelength observation matrix
+#         # Compute Hw' * Vw_inv
+#         HwtV = @views Hw'*inv(Ms[i].Vw) # Vw is typically diagonal or uniform scaling for simplicity
+#         Hs = @views Ms[i].Hs # Spatial observation matrix
+#         # Compute Hs' * Vs_inv
+#         HstV = @views Hs'*inv(Ms[i].Vs) # Vs is typically diagonal or uniform scaling
+
+#         # Innovation: difference between observed measurements and predicted measurements
+#         # (Hs * x_predr * Hw') is the predicted measurement based on the current state.
+#         res_pred = @views ys[i] - Hs * x_predr * Hw' 
+
+#         # Accumulate the H' * V_inv * H term using Kronecker product structure
+#         # This term is (H_w' V_w_inv H_w) kron (H_s' V_s_inv H_s)
+#         # where V_w and V_s are spectral and spatial observation noise covariances.
+#         # Here, `inv(Ms[i].Vw)` and `inv(Ms[i].Vs)` are used, assuming they are pre-inverted or easily invertible.
+#         HViH .+= kronecker(HwtV*Hw, HstV*Hs)
+
+#         # Accumulate the H' * V_inv * innovation term.
+#         # The structure is (H_s' V_s_inv res_pred V_w_inv H_w)'
+#         HVie .+= vec(HstV * res_pred * HwtV') # vec converts matrix to vector for accumulation
+#     end
+
+#     ## Woodbury Matrix Identity application for efficient covariance update
+#     # P_new = (P_pred_inv + H'R_inv H)_inv = P_pred - P_pred * H' * (H * P_pred * H' + R)_inv * H * P_pred
+#     # The term (P_pred_inv + HViH) needs to be inverted.
+#     # The initial S is P_pred_inv implicitly, then HViH is added.
+#     S = P_pred[:,:] # Make a mutable copy of P_pred
+    
+#     # Efficiently compute inverse of P_pred using Cholesky decomposition
+#     # LAPACK.potrf! performs Cholesky factorization (A = U'U or L L')
+#     # LAPACK.potri! computes the inverse from the Cholesky factor
+#     # LinearAlgebra.copytri! ensures the full symmetric matrix is formed from the upper/lower triangle
+#     begin
+#         LAPACK.potrf!('U', S) # Cholesky factorization of S (P_pred)
+#         LAPACK.potri!('U', S) # Invert S from its Cholesky factor
+#         LinearAlgebra.copytri!(S,'U') # Copy upper triangle to lower to complete the symmetric inverse
+#     end
+#     S .+= HViH; # S now holds (P_pred_inv + HViH)
+
+#     # Invert S again (which is (P_pred_inv + HViH))
+#     LAPACK.potrf!('U', S)
+#     LAPACK.potri!('U', S)
+    
+#     # Calculate HtRHIi = (P_pred_inv + HViH)_inv * HViH
+#     # This term is equivalent to K * H, where K is the Kalman gain.
+#     HtRHIi = BLAS.symm('R', 'U', S, HViH)
+
+#     # Compute F = P_pred * (I - HtRHIi) implicitly for Kalman Gain part
+#     # F here is equivalent to P_pred * (P_pred_inv + HViH)_inv * P_pred_inv
+#     # It essentially forms P_pred * (I - K*H) where K is the Kalman Gain
+#     F .= P_pred; # Initialize F with P_pred
+#     mul!(F, P_pred, HtRHIi, -1.0, 1.0); # F = P_pred - P_pred * HtRHIi (i.e., F = P_pred * (I - HtRHIi))
+
+#     # Update state mean: x_new = x_pred + K * innovation
+#     # Where K * innovation is implicitly F * HVie
+#     x_new .= x_pred
+#     mul!(x_new, F, HVie, 1.0, 1.0) # x_new = x_pred + F * HVie
+    
+#     # Update state covariance: P_new = (I - K*H) * P_pred
+#     # Where K*H is implicitly F*HViH
+#     F .= F * HViH; # F now holds F_prev * HViH = P_pred * (I - HtRHIi) * HViH
+#     P_new .= P_pred # Initialize P_new with P_pred
+#     mul!(P_new, F, P_pred, -1.0, 1.0) # P_new = P_pred - F * P_pred = (I - F_prev*HViH) * P_pred
+    
+#     # Explicitly symmetrize to avoid numerical precision issues
+#     P_new .= (P_new + P_new') / 2
+    
+#     # Add small regularization to maintain numerical stability and positive-definiteness
+#     max_diag = maximum(abs, diag(P_new))
+#     n_dim = size(P_new, 1)
+#     reg_amount = max_diag * 1e-3 + 1e-8
+#     for i in 1:n_dim
+#         P_new[i, i] += reg_amount
+#     end
+
+#     return x_new, P_new
+# end
+
 """
     woodbury_filter_kr(Ms, ys, x_pred, P_pred)
 
@@ -292,7 +394,7 @@ function woodbury_filter_kr(Ms::AbstractVector{<:HSModel},
     HVie = zeros(N) # Accumulates H' * V_inv * innovation terms
     x_new = ones(N) # Filtered state mean
     P_new = zeros(N,N) # Filtered state covariance
-    F = zeros(N,N) # Intermediate matrix for Woodbury identity
+    # F = zeros(N,N) # Intermediate matrix for Woodbury identity
 
     # Reshape the predicted state mean for easier matrix multiplication with H_spatial and H_wavelength
     x_predr = reshape(x_pred, (ns,nw))
@@ -321,48 +423,39 @@ function woodbury_filter_kr(Ms::AbstractVector{<:HSModel},
         HVie .+= vec(HstV * res_pred * HwtV') # vec converts matrix to vector for accumulation
     end
 
-    ## Woodbury Matrix Identity application for efficient covariance update
-    # P_new = (P_pred_inv + H'R_inv H)_inv = P_pred - P_pred * H' * (H * P_pred * H' + R)_inv * H * P_pred
-    # The term (P_pred_inv + HViH) needs to be inverted.
-    # The initial S is P_pred_inv implicitly, then HViH is added.
+    ## Information-form update
+    # S = P_pred⁻¹ + H' V_inv H ;  P_new = S⁻¹ ;  x_new = x_pred + P_new * HVie
     S = P_pred[:,:] # Make a mutable copy of P_pred
-    
-    # Efficiently compute inverse of P_pred using Cholesky decomposition
-    # LAPACK.potrf! performs Cholesky factorization (A = U'U or L L')
-    # LAPACK.potri! computes the inverse from the Cholesky factor
-    # LinearAlgebra.copytri! ensures the full symmetric matrix is formed from the upper/lower triangle
     begin
-        LAPACK.potrf!('U', S) # Cholesky factorization of S (P_pred)
-        LAPACK.potri!('U', S) # Invert S from its Cholesky factor
-        LinearAlgebra.copytri!(S,'U') # Copy upper triangle to lower to complete the symmetric inverse
+        LAPACK.potrf!('U', S) # Cholesky factorization of P_pred
+        LAPACK.potri!('U', S) # S = P_pred⁻¹ (upper triangle)
+        LinearAlgebra.copytri!(S,'U') # complete the symmetric inverse
     end
-    S .+= HViH; # S now holds (P_pred_inv + HViH)
+    S .+= HViH; # S = P_pred⁻¹ + H' V_inv H
 
-    # Invert S again (which is (P_pred_inv + HViH))
+    # Invert in place: S now holds (P_pred⁻¹ + H' V_inv H)⁻¹ = P_new
     LAPACK.potrf!('U', S)
     LAPACK.potri!('U', S)
+    LinearAlgebra.copytri!(S,'U') ## ADDED: potri! fills only the upper triangle; S is now used as a full matrix
     
-    # Calculate HtRHIi = (P_pred_inv + HViH)_inv * HViH
-    # This term is equivalent to K * H, where K is the Kalman gain.
-    HtRHIi = BLAS.symm('R', 'U', S, HViH)
+    # ## REMOVED: HtRHIi = HViH * S   (symm with side 'R': symmetric S on the right)
+    # HtRHIi = BLAS.symm('R', 'U', S, HViH)
 
-    # Compute F = P_pred * (I - HtRHIi) implicitly for Kalman Gain part
-    # F here is equivalent to P_pred * (P_pred_inv + HViH)_inv * P_pred_inv
-    # It essentially forms P_pred * (I - K*H) where K is the Kalman Gain
-    F .= P_pred; # Initialize F with P_pred
-    mul!(F, P_pred, HtRHIi, -1.0, 1.0); # F = P_pred - P_pred * HtRHIi (i.e., F = P_pred * (I - HtRHIi))
+    # ## REMOVED: F = P_pred * (I - HViH * S), which simplifies to S
+    # F .= P_pred; # Initialize F with P_pred
+    # mul!(F, P_pred, HtRHIi, -1.0, 1.0); # F = P_pred - P_pred * HtRHIi
 
-    # Update state mean: x_new = x_pred + K * innovation
-    # Where K * innovation is implicitly F * HVie
+    # Update state mean: x_new = x_pred + P_new * HVie
     x_new .= x_pred
-    mul!(x_new, F, HVie, 1.0, 1.0) # x_new = x_pred + F * HVie
+    # mul!(x_new, F, HVie, 1.0, 1.0) # x_new = x_pred + F * HVie   ## REMOVED: F = S
+    mul!(x_new, S, HVie, 1.0, 1.0) ## ADDED: x_new = x_pred + S * HVie
     
-    # Update state covariance: P_new = (I - K*H) * P_pred
-    # Where K*H is implicitly F*HViH
-    F .= F * HViH; # F now holds F_prev * HViH = P_pred * (I - HtRHIi) * HViH
-    P_new .= P_pred # Initialize P_new with P_pred
-    mul!(P_new, F, P_pred, -1.0, 1.0) # P_new = P_pred - F * P_pred = (I - F_prev*HViH) * P_pred
-    
+    # ## REMOVED: P_new = P_pred - F * HViH * P_pred, which simplifies to S
+    # F .= F * HViH;
+    # P_new .= P_pred
+    # mul!(P_new, F, P_pred, -1.0, 1.0)
+    P_new .= S ## ADDED: P_new = (P_pred⁻¹ + H' V_inv H)⁻¹
+
     # Explicitly symmetrize to avoid numerical precision issues
     P_new .= (P_new + P_new') / 2
     
