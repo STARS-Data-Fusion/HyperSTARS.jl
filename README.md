@@ -59,7 +59,9 @@ julia --project=. examples/emit_hls_demo.jl       # with real data
 ## Table of Contents
 
 - [Quick Start](#quick-start-1-minute)
+<!-- 
 - [Team](#team)
+-->
 - [Getting Started: Complete Guide](#getting-started-complete-step-by-step-guide)
   - [Step 1: Install Julia Package](#step-1-install-julia-package)
   - [Step 2: NASA Earthdata Credentials](#step-2-set-up-nasa-earthdata-credentials)
@@ -74,6 +76,7 @@ julia --project=. examples/emit_hls_demo.jl       # with real data
 
 ---
 
+<!-- 
 ## Team
 
 Margaret C. Johnson (she/her)<br>
@@ -110,6 +113,7 @@ Kerry Cawse-Nicholson (she/her)<br>
 [kerry-anne.cawse-nicholson@jpl.nasa.gov](mailto:kerry-anne.cawse-nicholson@jpl.nasa.gov)<br>
 Science and applications discussions.<br>
 NASA Jet Propulsion Laboratory
+-->
 
 ## Getting Started: Complete Step-by-Step Guide
 
