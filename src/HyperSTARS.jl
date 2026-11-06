@@ -875,6 +875,57 @@ end
 #     return reverse(smoothed_means), reverse(smoothed_covs)
 # end
 
+"""
+    smooth_series_means(F, predicted_means, predicted_covs, filtering_means, filtering_covs)
+
+Rauch-Tung-Striebel smoother for the MEANS only (no smoothed covariances).
+Same inputs and indexing as `smooth_series`:
+  filtering_*[:, i]   is the filtered state at step i-1   (P_{i-1|i-1})
+  predicted_*[:, i]   is the predicted state at step i    (P_{i|i-1})
+Returns `smoothed_means`, indexed like `predicted_means`.
+
+Recursion (k = i-1):
+    x_{k|n} = x_{k|k} + P_{k|k} Fᵀ P_{k+1|k}⁻¹ (x_{k+1|n} - x_{k+1|k})
+
+The gain is applied to a vector, never formed as a matrix:
+  1. d = x_{k+1|n} - x_{k+1|k}
+  2. solve P_{k+1|k} w = d        (Cholesky + two triangular solves)
+  3. x_{k|n} = x_{k|k} + P_{k|k} (Fᵀ w)
+Cost per step ≈ N³/3 (the factorization) + O(N²), versus ≈ 7N³ for
+`smooth_series`, which also propagates the smoothed covariance.
+"""
+function smooth_series_means(F::Union{AbstractSparseMatrix{Float64},AbstractMatrix{Float64},UniformScaling{Float64}},
+                             predicted_means::AbstractArray{Float64},
+                             predicted_covs::AbstractArray{Float64},
+                             filtering_means::AbstractArray{Float64},
+                             filtering_covs::AbstractArray{Float64})
+
+    n, nsteps = size(predicted_means)
+    smoothed_means = zeros(n, nsteps)
+
+    # last smoothed state = last filtered state
+    @views smoothed_means[:, nsteps] .= filtering_means[:, nsteps+1]
+
+    CC = zeros(n, n)   # reused workspace for the Cholesky factor
+    d  = zeros(n)      # innovation of the smoother, then P_pred⁻¹ * d
+
+    for i in nsteps:-1:2
+        # d = x_{k+1|n} - x_{k+1|k}
+        @views d .= smoothed_means[:, i] .- predicted_means[:, i]
+
+        # d ← P_{k+1|k}⁻¹ d   (Cholesky, no explicit inverse)
+        @views CC .= predicted_covs[:, :, i]
+        LAPACK.potrf!('U', CC)
+        LAPACK.potrs!('U', CC, d)
+
+        # x_{k|n} = x_{k|k} + P_{k|k} Fᵀ d
+        w = F' * d
+        @views mul!(smoothed_means[:, i-1], filtering_covs[:, :, i], w)
+        @views smoothed_means[:, i-1] .+= filtering_means[:, i]
+    end
+
+    return smoothed_means
+end
 
 
 """
@@ -2400,11 +2451,21 @@ function hyperSTARS_swath_fusion_kr_dict(d,
 
     ## update with back projection
     if smooth
+        # st = minimum(kp_times)
+        # smoothed_means, smoothed_covs = smooth_series(F, predicted_means[:,st:end], predicted_covs[:,:,st:end], filtering_means[:,st:end], filtering_covs[:,:,st:end])
+        # for (ti,t2) in enumerate(kp_times .- st .+ 1)
+        #     fused_image[:,:,ti] = @views reshape(smoothed_means[:,t2],(nf,p))[bau_kp,:] * B' .+ spectral_mean' ## back project to spectral domain
+        #     Σ = @views smoothed_covs[:,:,t2]
+        #     fused_sd_image[:,:,ti] = sqrt.(diag_cov_XB(Σ, B', nf, p, nw)[bau_kp,:])
+        # end
+
+        ## swapping in fast smoother, filter covariances used for uncertainty
         st = minimum(kp_times)
-        smoothed_means, smoothed_covs = smooth_series(F, predicted_means[:,st:end], predicted_covs[:,:,st:end], filtering_means[:,st:end], filtering_covs[:,:,st:end])
+        smoothed_means = @views smooth_series_means(F, predicted_means[:,st:end], predicted_covs[:,:,st:end],
+                                                     filtering_means[:,st:end], filtering_covs[:,:,st:end])
         for (ti,t2) in enumerate(kp_times .- st .+ 1)
             fused_image[:,:,ti] = @views reshape(smoothed_means[:,t2],(nf,p))[bau_kp,:] * B' .+ spectral_mean' ## back project to spectral domain
-            Σ = @views smoothed_covs[:,:,t2]
+            Σ = @views filtering_covs[:,:,t2 + st]      ## filtered covariance at this target time (= index kp_time + 1)
             fused_sd_image[:,:,ti] = sqrt.(diag_cov_XB(Σ, B', nf, p, nw)[bau_kp,:])
         end
     else
