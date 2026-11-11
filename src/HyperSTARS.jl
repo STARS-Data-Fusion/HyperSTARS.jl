@@ -2184,7 +2184,7 @@ function hyperSTARS_swath_smooth(d,
     fused_image    = zeros(nbau, nw, length(target_times))
     fused_sd_image = zeros(nbau, nw, length(target_times))
 
-    function emit(t, x, Σ)
+    function write_output(t, x, Σ)
         if haskey(out_index, t)
             _backproject!(fused_image, fused_sd_image, out_index[t], x, Σ,
                           B, spectral_mean, nf, p, nw, s.bau_kp)
@@ -2193,9 +2193,9 @@ function hyperSTARS_swath_smooth(d,
     end
 
     if uncertainty === :filtered
-        _rts_means!(emit, F, filtering_means, filt_covs, pred_covs, st, nsteps)
+        _rts_means!(write_output, F, filtering_means, filt_covs, pred_covs, st, nsteps)
     else
-        _rts_full!(emit, F, filtering_means, filt_covs, pred_covs, st, nsteps)
+        _rts_full!(write_output, F, filtering_means, filt_covs, pred_covs, st, nsteps)
     end
 
     return s.kp_ij, fused_image, fused_sd_image
@@ -2521,7 +2521,7 @@ function hyperSTARS_grid_smooth(d,
     fused_image    = zeros(nbau, nw, length(target_times))
     fused_sd_image = zeros(nbau, nw, length(target_times))
 
-    function emit(t, x, Σ)
+    function write_output(t, x, Σ)
         if haskey(out_index, t)
             _backproject!(fused_image, fused_sd_image, out_index[t], x, Σ,
                           B, spectral_mean, nf, p, nw, s.rows)
@@ -2530,9 +2530,9 @@ function hyperSTARS_grid_smooth(d,
     end
 
     if uncertainty === :filtered
-        _rts_means!(emit, F, filtering_means, filt_covs, pred_covs, st, nsteps)
+        _rts_means!(write_output, F, filtering_means, filt_covs, pred_covs, st, nsteps)
     else
-        _rts_full!(emit, F, filtering_means, filt_covs, pred_covs, st, nsteps)
+        _rts_full!(write_output, F, filtering_means, filt_covs, pred_covs, st, nsteps)
     end
 
     return s.kp_ij, fused_image, fused_sd_image
