@@ -17,7 +17,7 @@ module HyperSTARS
 
 export organize_data
 export scene_inds_fusion_pmap
-export scene_inds_1D_fusion_pmap
+export scene_fusion_pmap
 export swath_fusion_pmap
 export gridded_fusion_pmap
 export create_data_dicts
@@ -1309,6 +1309,61 @@ function scene_fusion_pmap(inst_data::AbstractVector{InstrumentData},
 
 end
 
+# --- Deprecated v1 interface ----------------------------------------------------
+"""
+    scene_fusion_pmap(inst_data, inst_geodata, window_geodata, target_geodata,
+                      spectral_mean, prior_mean, prior_var, B, model_pars; kwargs...)
+
+Deprecated v1 interface. Calls `gridded_fusion_pmap` with the settings that
+reproduce v1 gridded behavior:
+
+- `G = ar_phi * I(p)` (v1 used `F = UniformScaling(ar_phi)`)
+- `tscov_lag = nothing` (full-history process covariance)
+- `nodata_reg = 0.0` (no regularization on steps without data)
+- `uncertainty = :smoothed` when `smooth = true` (v1 ran the full RTS smoother)
+
+Keyword arguments and defaults match v1. Returns `(fused_image, fused_sd_image)`.
+"""
+function scene_fusion_pmap2(inst_data::AbstractVector{InstrumentData},
+                      inst_geodata::AbstractVector{InstrumentGeoData},
+                      window_geodata::InstrumentGeoData,
+                      target_geodata::InstrumentGeoData,
+                      spectral_mean::AbstractVector{<:Real},
+                      prior_mean::AbstractArray{<:Real},
+                      prior_var::AbstractArray{<:Real},
+                      B::AbstractArray{<:Real},
+                      model_pars::AbstractArray{<:Real};
+                      nsamp::Integer = 100,
+                      window_buffer::Integer = 2,
+                      target_times::Union{AbstractVector{<:Real}, UnitRange{<:Real}} = [1],
+                      smooth::Bool = false,
+                      spatial_mod::Function = mat32_corD,
+                      obs_operator::Function = unif_weighted_obs_operator,
+                      state_in_cov::Bool = true,
+                      cov_wt::Real = 0.3,
+                      tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
+                      ar_phi::Real = 1.0,
+                      window_radius::Real = 0.0,
+                      use_progress_bar::Bool = true)
+
+    @warn """`scene_fusion_pmap` is deprecated; use `gridded_fusion_pmap`. To reproduce v1 results:
+        gridded_fusion_pmap(..., B, ar_phi*I(size(B,2)), model_pars;
+                            tscov_lag = nothing, nodata_reg = 0.0,
+                            uncertainty = smooth ? :smoothed : :filtered, ...)""" maxlog=1
+
+    p = size(B, 2)
+    G = Matrix{Float64}(ar_phi * I, p, p)
+
+    return gridded_fusion_pmap(inst_data, inst_geodata, window_geodata, target_geodata,
+                               spectral_mean, prior_mean, prior_var, B, G, model_pars;
+                               nsamp, window_buffer, target_times, smooth,
+                               uncertainty = smooth ? :smoothed : :filtered,
+                               spatial_mod, obs_operator, state_in_cov, cov_wt, tscov_pars,
+                               tscov_lag = nothing,
+                               nodata_reg = 0.0,
+                               window_radius, use_progress_bar)
+end
+
 function scene_inds_fusion_pmap(inst_data::AbstractVector{InstrumentData},
                       inst_geodata::AbstractVector{InstrumentGeoData},
                       window_geodata::InstrumentGeoData,
@@ -1378,12 +1433,12 @@ function scene_inds_fusion_pmap(inst_data::AbstractVector{InstrumentData},
         full_ext = merge_extents(all_exts, sign.(target_csize))
         target_ij = find_all_ij_ext(window_bbox[1,:], window_bbox[2,:], target_origin, target_csize, target_ndims; inclusive=false)
         ss_ij = find_all_ij_ext(buffer_ext[1,:], buffer_ext[2,:], target_origin, target_csize, target_ndims)
-        # if any(res_flag .== 2)
-        #     ss_ij = unique(vcat(ss_ij, sobol_bau_ij(full_ext[1,:], full_ext[2,:], target_origin, target_csize, target_ndims; nsamp=nsamp)),dims=1)
-        # end
+        if any(res_flag .== 2)
+            ss_ij = unique(vcat(ss_ij, sobol_bau_ij(full_ext[1,:], full_ext[2,:], target_origin, target_csize, target_ndims; nsamp=nsamp)),dims=1)
+        end
 
         ## always subsample, captures larger length-scales within window radius
-        ss_ij = unique(vcat(ss_ij, sobol_bau_ij(full_ext[1,:], full_ext[2,:], target_origin, target_csize, target_ndims; nsamp=nsamp)),dims=1)
+        # ss_ij = unique(vcat(ss_ij, sobol_bau_ij(full_ext[1,:], full_ext[2,:], target_origin, target_csize, target_ndims; nsamp=nsamp)),dims=1)
 
         ss_xy = get_sij_from_ij(ss_ij, target_origin, target_csize)
         measurements, ss_ij = organize_data(full_ext, inst_geodata, inst_data, target_geodata, ss_xy, ss_ij, res_flag)
@@ -1423,6 +1478,60 @@ function scene_inds_fusion_pmap(inst_data::AbstractVector{InstrumentData},
     
     return fused_image, fused_sd_image
 
+end
+
+"""
+    scene_inds_fusion_pmap(inst_data, inst_geodata, window_geodata, target_geodata, inds,
+                           spectral_mean, prior_mean, prior_var, B, model_pars; kwargs...)
+
+Deprecated v1 interface. Like `scene_fusion_pmap`, but processes only the windows in
+`inds` (an nr×2 matrix of (k,l) window indices). Calls `gridded_fusion_pmap` with
+`inds` and the v1 settings listed for `scene_fusion_pmap`.
+
+Unlike v1, the Sobol BAU subsample is added only when a coarse (fidelity 2)
+instrument is present, as in `scene_fusion_pmap`.
+"""
+function scene_inds_fusion_pmap2(inst_data::AbstractVector{InstrumentData},
+                      inst_geodata::AbstractVector{InstrumentGeoData},
+                      window_geodata::InstrumentGeoData,
+                      target_geodata::InstrumentGeoData,
+                      inds::AbstractArray{<:Real},
+                      spectral_mean::AbstractVector{<:Real},
+                      prior_mean::AbstractArray{<:Real},
+                      prior_var::AbstractArray{<:Real},
+                      B::AbstractArray{<:Real},
+                      model_pars::AbstractArray{<:Real};
+                      nsamp::Integer = 100,
+                      window_buffer::Integer = 2,
+                      target_times::Union{AbstractVector{<:Real}, UnitRange{<:Real}} = [1],
+                      smooth::Bool = false,
+                      spatial_mod::Function = mat32_corD,
+                      obs_operator::Function = unif_weighted_obs_operator,
+                      state_in_cov::Bool = true,
+                      cov_wt::Real = 0.3,
+                      tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
+                      ar_phi::Real = 1.0,
+                      window_radius::Real = 0.0,
+                      use_progress_bar::Bool = true)
+
+    @warn """`scene_inds_fusion_pmap` is deprecated; use `gridded_fusion_pmap` with `inds`. To reproduce v1 results:
+        gridded_fusion_pmap(..., B, ar_phi*I(size(B,2)), model_pars; inds,
+                            tscov_lag = nothing, nodata_reg = 0.0,
+                            uncertainty = smooth ? :smoothed : :filtered, ...)""" maxlog=1
+
+    p = size(B, 2)
+    G = Matrix{Float64}(ar_phi * I, p, p)
+
+    return gridded_fusion_pmap(inst_data, inst_geodata, window_geodata, target_geodata,
+                               spectral_mean, prior_mean, prior_var, B, G, model_pars;
+                               nsamp, window_buffer, target_times, smooth,
+                               uncertainty = smooth ? :smoothed : :filtered,
+                               spatial_mod, obs_operator, state_in_cov, cov_wt, tscov_pars,
+                               tscov_lag = nothing,
+                               nodata_reg = 0.0,
+                               window_radius,
+                               inds = Int.(inds),
+                               use_progress_bar)
 end
 
 ###### Swath Fusion Functions
@@ -1852,13 +1961,13 @@ function _grid_obs_models(measurements, t2, Hss, Hs_valid, Hws, Hms, Qf, F)
         kt = measurements[x].dates .== t2
         any(kt) || continue
 
-        yss = @views measurements[x].data[:,:,kt]
-        ym = .!vec(any(isnan, yss; dims=2))
-        nonzero_rows = Hs_valid[x]
+        yss  = @views measurements[x].data[:,:,kt]
+        keep = .!vec(any(isnan, yss; dims=2)) .& Hs_valid[x]   # data present and operator row valid
+        any(keep) || continue
 
-        Hs2 = Hss[x][ym[nonzero_rows],:]
+        Hs2 = Hss[x][keep,:]
         push!(Ms, HyperSTARS.HSModel(Hws[x], Hs2, Diagonal(measurements[x].uq[:,kt][:]), 1.0*I(size(Hs2,1)), Qf, F))
-        push!(ys, yss[ym[nonzero_rows],:] .- Hms[x]' .- measurements[x].bias[:,kt]')
+        push!(ys, yss[keep,:] .- Hms[x]' .- measurements[x].bias[:,kt]')
     end
     return Ms, ys
 end
@@ -2035,7 +2144,8 @@ function _grid_window_dicts(inst_data::AbstractVector{InstrumentData},
                             model_pars::AbstractArray{<:Real};
                             nsamp::Integer = 100,
                             window_buffer::Integer = 2,
-                            window_radius::Real = 0.0)
+                            window_radius::Real = 0.0,
+                            inds::Union{Nothing,AbstractMatrix{<:Integer}} = nothing)
 
     window_csize  = window_geodata.cell_size
     target_csize  = target_geodata.cell_size
@@ -2044,7 +2154,17 @@ function _grid_window_dicts(inst_data::AbstractVector{InstrumentData},
     target_origin = target_geodata.origin
     target_ndims  = target_geodata.ndims
 
-    inds = hcat(repeat(1:nwindows[1], inner=nwindows[2]), repeat(1:nwindows[2], outer=nwindows[1]))
+    # Windows to process, one (k,l) per row. Default: every window in the grid.
+    if isnothing(inds)
+        inds = hcat(repeat(1:nwindows[1], inner=nwindows[2]), repeat(1:nwindows[2], outer=nwindows[1]))
+    else
+        size(inds, 2) == 2 ||
+            throw(DimensionMismatch("inds must be an nr×2 matrix of (k,l) window indices, got size $(size(inds))"))
+        (all(1 .<= inds[:,1] .<= nwindows[1]) && all(1 .<= inds[:,2] .<= nwindows[2])) ||
+            throw(ArgumentError("inds contains window indices outside 1:$(nwindows[1]) × 1:$(nwindows[2])"))
+        allunique(eachrow(inds)) ||
+            throw(ArgumentError("inds contains duplicate windows"))
+    end
     nr = size(inds,1)
 
     T = Vector{Dict{Symbol,Any}}(undef, nr)
@@ -2107,6 +2227,7 @@ function gridded_fusion_pmap(inst_data::AbstractVector{InstrumentData},
                       tscov_lag = 7,
                       nodata_reg::Real = 1e-10,
                       window_radius::Real = 0.0,
+                      inds::Union{Nothing,AbstractMatrix{<:Integer}} = nothing,
                       use_progress_bar::Bool = true)
 
     if size(G,2) != size(B,2)
@@ -2128,7 +2249,7 @@ function gridded_fusion_pmap(inst_data::AbstractVector{InstrumentData},
 
     T, inds = _grid_window_dicts(inst_data, inst_geodata, window_geodata, target_geodata,
                                  prior_mean, prior_var, model_pars;
-                                 nsamp, window_buffer, window_radius)
+                                 nsamp, window_buffer, window_radius, inds)
     nr = length(T)
 
     common_kw = (; spatial_mod, obs_operator, state_in_cov, cov_wt,
