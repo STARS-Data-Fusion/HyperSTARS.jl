@@ -31,8 +31,8 @@ export InstrumentData
 export InstrumentGeoData
 export SwathData
 
-export cell_size # Assuming this is defined in spatial_utils_ll.jl and re-exported
-export get_centroid_origin_raster # Assuming this is defined in spatial_utils_ll.jl and re-exported
+export cell_size 
+export get_centroid_origin_raster 
 
 export nanmean
 export nanvar # nanvar was exported but not defined in the original code, so adding a basic one here
@@ -45,7 +45,7 @@ export mat32_corD
 export mat52_corD
 export state_cov
 
-export unif_weighted_obs_operator_centroid # Assuming this is defined in spatial_utils_ll.jl and re-exported
+export unif_weighted_obs_operator_centroid 
 
 
 # --- Package Imports ---
@@ -679,7 +679,7 @@ function scene_fusion_pmap(inst_data::AbstractVector{InstrumentData},
                       target_times::Union{AbstractVector{<:Real}, UnitRange{<:Real}} = [1],
                       smooth::Bool = false,
                       spatial_mod::Function = mat32_corD,
-                      obs_operator::Function = unif_weighted_obs_operator,
+                      obs_operator::Function = unif_weighted_obs_operator_centroid,
                       state_in_cov::Bool = true,
                       cov_wt::Real = 0.3,
                       tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
@@ -731,7 +731,7 @@ function scene_inds_fusion_pmap(inst_data::AbstractVector{InstrumentData},
                       target_times::Union{AbstractVector{<:Real}, UnitRange{<:Real}} = [1],
                       smooth::Bool = false,
                       spatial_mod::Function = mat32_corD,
-                      obs_operator::Function = unif_weighted_obs_operator,
+                      obs_operator::Function = unif_weighted_obs_operator_centroid,
                       state_in_cov::Bool = true,
                       cov_wt::Real = 0.3,
                       tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
@@ -1205,7 +1205,7 @@ function hyperSTARS_grid_filter(d,
                 G::AbstractArray{<:Real},
                 target_times::Union{AbstractVector{<:Real}, UnitRange{<:Real}} = [1];
                 spatial_mod::Function = mat32_corD,
-                obs_operator::Function = unif_weighted_obs_operator,
+                obs_operator::Function = unif_weighted_obs_operator_centroid,
                 state_in_cov::Bool = true,
                 cov_wt::Real = 0.3,
                 tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
@@ -1279,7 +1279,7 @@ function hyperSTARS_grid_smooth(d,
                 target_times::Union{AbstractVector{<:Real}, UnitRange{<:Real}} = [1];
                 uncertainty::Symbol = :filtered,
                 spatial_mod::Function = mat32_corD,
-                obs_operator::Function = unif_weighted_obs_operator,
+                obs_operator::Function = unif_weighted_obs_operator_centroid,
                 state_in_cov::Bool = true,
                 cov_wt::Real = 0.3,
                 tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
@@ -1445,7 +1445,7 @@ function gridded_fusion_pmap(inst_data::AbstractVector{InstrumentData},
                       smooth::Bool = false,
                       uncertainty::Symbol = :filtered,
                       spatial_mod::Function = mat32_corD,
-                      obs_operator::Function = unif_weighted_obs_operator,
+                      obs_operator::Function = unif_weighted_obs_operator_centroid,
                       state_in_cov::Bool = true,
                       cov_wt::Real = 0.3,
                       tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
