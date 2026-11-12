@@ -106,23 +106,23 @@ end
 #   filt_covs[:,:,t-st+1]   = filtered covariance  at times[t],  t ≥ st
 #   pred_covs[:,:,t-st]     = predicted covariance at times[t],  t ≥ st+1
 #
-# Both passes call emit(t, x_smooth, Σ) for t = nsteps down to st. `Σ` may be a
-# buffer that is overwritten on the next step, so `emit` must use it immediately.
+# Both passes call on_step(t, x_smooth, Σ) for t = nsteps down to st. `Σ` may be a
+# buffer that is overwritten on the next step, so `on_step` must use it immediately.
 
 """
-    _rts_means!(emit, F, filtering_means, filt_covs, pred_covs, st, nsteps)
+    _rts_means!(on_step, F, filtering_means, filt_covs, pred_covs, st, nsteps)
 
-Backward RTS pass for the means only. `Σ` passed to `emit` is the filtered
+Backward RTS pass for the means only. `Σ` passed to `on_step` is the filtered
 covariance at that time. Overwrites `pred_covs` (factored in place).
 Cost per step ≈ n³/3.
 """
-function _rts_means!(emit, F, filtering_means, filt_covs, pred_covs, st, nsteps)
+function _rts_means!(on_step, F, filtering_means, filt_covs, pred_covs, st, nsteps)
     n  = size(filtering_means, 1)
     nk = nsteps - st + 1
 
     smoothed_means = zeros(n, nk)
     @views smoothed_means[:,nk] .= filtering_means[:,nsteps+1]   # last smoothed = last filtered
-    emit(nsteps, @view(smoothed_means[:,nk]), @view(filt_covs[:,:,nk]))
+    on_step(nsteps, @view(smoothed_means[:,nk]), @view(filt_covs[:,:,nk]))
 
     x_pred = zeros(n)
     dvec   = zeros(n)
@@ -141,27 +141,27 @@ function _rts_means!(emit, F, filtering_means, filt_covs, pred_covs, st, nsteps)
         @views mul!(smoothed_means[:,k-1], filt_covs[:,:,k-1], w)
         @views smoothed_means[:,k-1] .+= filtering_means[:,t]
 
-        emit(t-1, @view(smoothed_means[:,k-1]), @view(filt_covs[:,:,k-1]))
+        on_step(t-1, @view(smoothed_means[:,k-1]), @view(filt_covs[:,:,k-1]))
     end
     return smoothed_means
 end
 
 """
-    _rts_full!(emit, F, filtering_means, filt_covs, pred_covs, st, nsteps)
+    _rts_full!(on_step, F, filtering_means, filt_covs, pred_covs, st, nsteps)
 
-Full backward RTS pass: smoothed means and covariances. `Σ` passed to `emit` is
+Full backward RTS pass: smoothed means and covariances. `Σ` passed to `on_step` is
 the smoothed covariance at that time (a buffer, overwritten on the next step).
 Only the current smoothed covariance is held in memory. Does not modify
 `pred_covs`. Cost per step ≈ 7n³.
 """
-function _rts_full!(emit, F, filtering_means, filt_covs, pred_covs, st, nsteps)
+function _rts_full!(on_step, F, filtering_means, filt_covs, pred_covs, st, nsteps)
     n  = size(filtering_means, 1)
     nk = nsteps - st + 1
 
     smoothed_means = zeros(n, nk)
     @views smoothed_means[:,nk] .= filtering_means[:,nsteps+1]
     P_s = filt_covs[:,:,nk]                      # current smoothed covariance (copy)
-    emit(nsteps, @view(smoothed_means[:,nk]), P_s)
+    on_step(nsteps, @view(smoothed_means[:,nk]), P_s)
 
     x_pred = zeros(n)
     CC = zeros(n,n)
@@ -193,7 +193,7 @@ function _rts_full!(emit, F, filtering_means, filt_covs, pred_covs, st, nsteps)
         end
 
         smoothed_means[:,k-1] = x_smooth
-        emit(t-1, @view(smoothed_means[:,k-1]), P_s)
+        on_step(t-1, @view(smoothed_means[:,k-1]), P_s)
     end
     return smoothed_means
 end

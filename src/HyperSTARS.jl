@@ -16,15 +16,16 @@ Key functionalities include:
 module HyperSTARS
 
 export organize_data
-export scene_fusion_pmap
 export scene_inds_fusion_pmap
 export scene_inds_1D_fusion_pmap
 export swath_fusion_pmap
+export gridded_fusion_pmap
 export create_data_dicts
 export hyperSTARS_fusion_kr_dict
-export hyperSTARS_swath_fusion_kr_dict
 export hyperSTARS_swath_filter
 export hyperSTARS_swath_smooth
+export hyperSTARS_grid_filter
+export hyperSTARS_grid_smooth
 export information_filter_kr
 export information_filter_kr!
 export smooth_series
@@ -1751,13 +1752,18 @@ function swath_fusion_pmap(inst_data::AbstractVector{SwathData},
                       state_in_cov::Bool = true,
                       cov_wt::Real = 0.3,
                       tscov_pars::Union{Nothing,AbstractVector{<:Real}} = nothing,
-                      tscov_lag::Int = 7,
-                      mcvar::Real = 1e-5,
+                      tscov_lag = 7,
+                      mcvar::Real = 1e-6,
                       nodata_reg::Real = 1e-10)
 
     if size(G,2) != size(B,2)
         throw(DimensionMismatch("size(G,2)=$(size(G,2)) does not match size(B,2)=$(size(B,2))"))
     end
+
+    uncertainty in (:filtered, :smoothed) ||
+        throw(ArgumentError("uncertainty must be :filtered or :smoothed, got :$uncertainty"))
+    !smooth && uncertainty === :smoothed &&
+        throw(ArgumentError("uncertainty = :smoothed requires smooth = true"))
 
     target_waves = target_geodata.wavelengths
     target_ndims = target_geodata.ndims
@@ -2103,6 +2109,15 @@ function gridded_fusion_pmap(inst_data::AbstractVector{InstrumentData},
                       window_radius::Real = 0.0,
                       use_progress_bar::Bool = true)
 
+    if size(G,2) != size(B,2)
+        throw(DimensionMismatch("size(G,2)=$(size(G,2)) does not match size(B,2)=$(size(B,2))"))
+    end
+
+    uncertainty in (:filtered, :smoothed) ||
+        throw(ArgumentError("uncertainty must be :filtered or :smoothed, got :$uncertainty"))
+    !smooth && uncertainty === :smoothed &&
+        throw(ArgumentError("uncertainty = :smoothed requires smooth = true"))
+
     target_waves = target_geodata.wavelengths
     target_ndims = target_geodata.ndims
     nw = length(target_waves)
@@ -2115,11 +2130,6 @@ function gridded_fusion_pmap(inst_data::AbstractVector{InstrumentData},
                                  prior_mean, prior_var, model_pars;
                                  nsamp, window_buffer, window_radius)
     nr = length(T)
-
-    uncertainty in (:filtered, :smoothed) ||
-        throw(ArgumentError("uncertainty must be :filtered or :smoothed, got :$uncertainty"))
-    !smooth && uncertainty === :smoothed &&
-        throw(ArgumentError("uncertainty = :smoothed requires smooth = true"))
 
     common_kw = (; spatial_mod, obs_operator, state_in_cov, cov_wt,
                    tscov_pars, tscov_lag, nodata_reg)
