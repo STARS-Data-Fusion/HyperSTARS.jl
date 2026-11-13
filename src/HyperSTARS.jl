@@ -237,6 +237,8 @@ struct InstrumentGeoData
     rsr::Union{Dict,Any,AbstractArray} # Dict{w: wavelengths, rsr:rsr values} for discrete weights and wavelengths, or scalar common fwhm, or w length vector of fwhms
 end
 
+
+
 # --- Kalman Filter and Smoothing Functions ---
 
 """
@@ -764,12 +766,12 @@ struct SwathData
     data::AbstractVector{AbstractArray} # length T vector of (n x w)
     bias::AbstractVector{Union{Any,AbstractArray}} # length T vector of W error biases 
     uq::AbstractVector{Union{Any,AbstractArray}} # length T vector of W error variances 
-    fwhm::AbstractVector{AbstractVector} # length T vector of [rx,ry] vector of fwhm of psf
+    fwhm::AbstractVector{AbstractVector} # length T vector of [rx,ry] vector of fwhm of spatial psf
     dates::AbstractVector # vector of dates
     coords::AbstractVector{AbstractArray} # length T vector of n x 2 array of spatial coordinates
     wavelengths::AbstractVector # w vector of spectral wavelengths
-    psf::Function
-    psf_samp::Bool
+    psf::Function # spatial point spread function
+    psf_samp::Bool # whether to compute monte carlo sampling approximation for spatial convolution
     rsr::Union{Dict,Any,AbstractArray} # Dict{w: wavelengths, rsr:rsr values} for discrete weights and wavelengths, or scalar common fwhm, or w length vector of fwhms
 end
 

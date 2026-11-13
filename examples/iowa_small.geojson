@@ -1,0 +1,8 @@
+{
+"type": "FeatureCollection",
+"name": "iowa_small",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+"features": [
+{ "type": "Feature", "properties": { }, "geometry": { "type": "Polygon", "coordinates": [ [ [ -93.659294180473808, 42.252855513809507 ], [ -93.583524666325161, 42.251914195130567 ], [ -93.584808451924289, 42.195965421777338 ], [ -93.660505443714058, 42.196889559507007 ], [ -93.659294180473808, 42.252855513809507 ] ] ] } }
+]
+}

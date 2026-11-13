@@ -8,52 +8,6 @@ Hyperspectral Spatial Timeseries for Automated high-Resolution multi-Sensor data
 
 This Julia package, `HyperSTARS.jl`, is designed for advanced hyperspectral data fusion. It combines data from multiple instruments with varying spatial, spectral, and temporal resolutions into a single, high-resolution, fused product. The core methodology leverages state-space models and advanced statistical filtering and smoothing techniques (specifically, Kalman filtering and smoothing variants), making it robust for integrating diverse remote sensing datasets.
 
-
-## Setup Instructions
-
-**📊 Expected Workflow:** Install → Configure → Download Data → Run Examples
-
-### 1. Install Julia Package
-
-```bash
-git clone https://github.com/STARS-Data-Fusion/HyperSTARS.jl.git
-cd HyperSTARS.jl
-make install
-```
-
-> Note: `make install` runs `julia --project=. -e 'using Pkg; Pkg.instantiate()'`.
-
-### 2. Create Python Environment and Install EMIT Data Downloader
-
-```bash
-mamba create -n EMITL2ARFL -c conda-forge python=3.10 hdf5 h5py netcdf4
-mamba activate EMITL2ARFL
-pip install EMITL2ARFL
-```
-
-### 3. Set Up NASA Earthdata Credentials
-
-First, visit [NASA Earthdata](https://urs.earthdata.nasa.gov/) to create/access your account, then:
-
-```bash
-cat > ~/.netrc << EOF
-machine urs.earthdata.nasa.gov
-login YOUR_USERNAME
-password YOUR_PASSWORD
-EOF
-chmod 600 ~/.netrc
-```
-
-### 4. Download Data and Run Examples
-
-```bash
-julia --project=. examples/hyperstars_example.jl  # with synthetic data
-julia --project=. examples/emit_hls_demo.jl       # with real data
-```
-
-> 💡 **First time?** Follow the detailed step-by-step guide below for complete instructions.
-
-
 ---
 
 ## Table of Contents
@@ -133,22 +87,23 @@ Before starting, ensure you have:
 
 Clone this repository and install dependencies:
 
-```bash
-# Clone the repository
-git clone https://github.com/STARS-Data-Fusion/HyperSTARS.jl.git
-cd HyperSTARS.jl
-
-# Install Julia dependencies
-julia --project=. -e 'using Pkg; Pkg.instantiate()'
-
-# Verify installation
-julia --project=. -e 'using HyperSTARS; println("✅ HyperSTARS.jl installed successfully")'
+**julia**
+```julia
+using Pkg
+Pkg.add(url = "https://github.com/STARS-Data-Fusion/HyperSTARS.jl", rev = "v2.0.0")
 ```
 
-### Step 2: Set Up NASA Earthdata Credentials
+### Step 2: Download Data
 
-EMIT data requires NASA Earthdata authentication:
+#### Option 1: Download using supplied python helper packages:
 
+NOTE: In this option, unless you have access to AWS the full EMIT granules must be downloaded locally before spatial subsetting. Each granule (REFL, MASKS, UNCERT together) can be several GBs. The supplied download script deletes full downloaded files on a monthly cadence to avoid exploding data volumes. To avoid downloading full granules, use AppEEARS (Option 2).
+
+1. Set Up NASA Earthdata Credentials
+
+EMIT and HLS data require NASA Earthdata authentication:
+
+**bash**
 ```bash
 # Create .netrc file with your NASA Earthdata credentials
 cat > ~/.netrc << EOF
@@ -163,116 +118,172 @@ chmod 600 ~/.netrc
 
 > **Note**: Replace `YOUR_USERNAME` and `YOUR_PASSWORD` with your actual NASA Earthdata credentials from https://urs.earthdata.nasa.gov/
 
-### Step 3: Install EMIT Data Downloader (Python)
+2. Install EMIT and HLS Data Downloaders (Python)
 
-The companion Python package downloads and preprocesses EMIT data from PyPI:
+The companion Python packages download and preprocess EMIT and HLS data from PyPI:
 
+**bash**
 ```bash
 # Create conda environment with compatible HDF5 libraries
-mamba create -n EMITL2ARFL -c conda-forge python=3.10 hdf5 h5py netcdf4
-mamba activate EMITL2ARFL
+mamba create -n hyperstars_example -c conda-forge python=3.12 hdf5 h5py netcdf4 scikit-learn pykdtree scikit-image
+mamba activate hyperstars_example
 
 # Install the package from PyPI
 pip install EMITL2ARFL
+pip install harmonized-landsat-sentinel
 
 # Verify installation
 python -c "import EMITL2ARFL; print('✅ EMITL2ARFL installed successfully')"
+python -c "import harmonized_landsat_sentinel; print('✅ harmonized-landsat-sentinel installed successfully')"
 ```
 
-### Step 4: Download Example Data
+3. Download Example Data
 
-#### Option A: Use Synthetic Data (Fastest)
+Download EMIT data using download_emit_data.py. Update for your date range and AOI.
 
-For quick testing, you can request the synthetic dataset from the maintainers:
-
-- Contact: [maggie.johnson@jpl.nasa.gov](mailto:maggie.johnson@jpl.nasa.gov)
-- File: `synthetic_emit_hls_pace_data.jld2`
-- Place in: `HyperSTARS.jl/data/`
-
-Then run:
-```bash
-cd ../HyperSTARS.jl
-julia --project=. examples/hyperstars_example.jl
-```
-
-#### Option B: Download Real EMIT Data
-
-Download EMIT data for your area of interest:
-
+**python**
 ```python
-# Create a download script: download_emit_data.py
+# download_emit_data.py
+import os
+import shutil
+from glob import glob
+
 import earthaccess
 import geopandas as gpd
+import pandas as pd
 import rasters as rt
 from EMITL2ARFL import generate_EMIT_L2A_RFL_timeseries
 
-# Define your area of interest
-# Option 1: From coordinates (example: small area in California)
-# from shapely.geometry import box
-# geometry = box(-119.5, 36.8, -119.4, 36.9)
+START_DATE   = "2023-06-01"
+END_DATE     = "2023-08-31"
+AOI_FILE     = "iowa_ag.geojson"
+DOWNLOAD_DIR = os.path.expanduser("./EMIT_download")
+OUTPUT_DIR   = os.path.expanduser("./EMIT_data")
 
-# Option 2: From KML file
-gdf = gpd.read_file("your_area.kml")
-geometry = gdf.unary_union
 
-# Create grid for EMIT data (60m resolution)
-bbox_UTM = rt.Polygon(geometry).UTM.bbox
-grid = rt.RasterGrid.from_bbox(bbox_UTM, cell_size=60, crs=bbox_UTM.crs)
+def month_chunks(start, end):
+    """(first day, last day) of each calendar month in [start, end], clipped to the range."""
+    start, end = pd.Timestamp(start), pd.Timestamp(end)
+    for month in pd.period_range(start, end, freq="M"):
+        yield max(start, month.start_time.normalize()), min(end, month.end_time.normalize())
 
-# Login to NASA Earthdata
-earthaccess.login(strategy="netrc", persist=True)
 
-# Download EMIT data for date range
-filenames = generate_EMIT_L2A_RFL_timeseries(
-    start_date_UTC="2023-08-01",
-    end_date_UTC="2023-08-31",
-    geometry=grid,
-    download_directory="/tmp/EMIT_download",
-    output_directory="./EMIT_data"
-)
+def clean_download_dir(directory):
+    """Delete downloaded granule folders only (EMIT_L2A_RFL_001_*), nothing else in the directory."""
+    for path in glob(os.path.join(directory, "EMIT_L2A_RFL_001_*")):
+        if os.path.isdir(path):
+            shutil.rmtree(path)
 
-print(f"Downloaded {len(filenames)} EMIT files")
+
+def main():
+    # Area of interest → 60 m UTM grid
+    geometry = gpd.read_file(AOI_FILE).union_all()
+    bbox_UTM = rt.Polygon(geometry).UTM.bbox
+    grid = rt.RasterGrid.from_bbox(bbox_UTM, cell_size=60, crs=bbox_UTM.crs)
+
+    earthaccess.login(strategy="netrc", persist=True)
+
+    filenames = []
+    for start, end in month_chunks(START_DATE, END_DATE):
+        filenames += generate_EMIT_L2A_RFL_timeseries(
+            start_date_UTC=start.date(),
+            end_date_UTC=end.date(),
+            geometry=grid,
+            download_directory=DOWNLOAD_DIR,
+            output_directory=OUTPUT_DIR,
+        )
+        clean_download_dir(DOWNLOAD_DIR)    # only reached if the month finished
+
+    print(f"Wrote {len(filenames)} EMIT GeoTIFFs to {OUTPUT_DIR}")
+
+
+if __name__ == "__main__":
+    main()
 ```
 
 Run the script:
+
+**bash**
 ```bash
 python download_emit_data.py
 ```
 
-### Step 5: Download HLS Data (Optional)
+Download HLS data using download_hls_data.py. Update for your date range and AOI.
 
-For multi-sensor fusion with HLS (Harmonized Landsat Sentinel):
+```python
+from os.path import join
+import matplotlib.pyplot as plt
+import earthaccess
+import logging
 
-1. Visit [NASA AppEEARS](https://appeears.earthdatacloud.nasa.gov/)
-2. Select HLS products: HLSL30.002 and HLSS30.002
-3. Choose your area of interest and date range
-4. Download as NetCDF format
+import geopandas as gpd
+import rasters as rt
 
-### Step 6: Run the Examples
+from harmonized_landsat_sentinel import harmonized_landsat_sentinel as HLS
+from harmonized_landsat_sentinel import generate_HLS_timeseries
 
-#### Example 1: Synthetic Data Demo 🚀
+# Configure logging to see info messages
+logging.basicConfig(level=logging.INFO, format='%(name)s - %(levelname)s - %(message)s')
 
-**What it does:** Demonstrates basic fusion workflow with synthetic EMIT, HLS, and PACE data
+def main():
+    # Date range
+    start_date_UTC = "2023-06-01"
+    end_date_UTC = "2023-08-31"
 
+    # Download directory
+    download_directory = "./HLS_download"
+
+    # Output directory
+    output_directory = "./HLS_data"
+
+    # Arrow Peak area of interest
+    gdf = gpd.read_file("iowa_ag.geojson")
+
+    gdf.geometry[0]
+
+    bbox_UTM = rt.Polygon(gdf.union_all()).UTM.bbox
+
+    # Log into earthaccess using netrc credentials
+    earthaccess.login(strategy="netrc", persist=True)
+
+    filenames = generate_HLS_timeseries(
+        start_date_UTC=start_date_UTC,
+        end_date_UTC=end_date_UTC,
+        geometry=bbox_UTM,
+        download_directory=download_directory,
+        output_directory=output_directory,
+        source="both"
+    )
+
+if __name__ == "__main__":
+    main()
+```
+Run the script.
 ```bash
-cd HyperSTARS.jl
-julia --project=. examples/hyperstars_example.jl
+python download_hls_data.py
 ```
 
-**Features demonstrated:**
-- ✓ Fusion of EMIT, HLS, and PACE data
-- ✓ PCA-based spectral dimensionality reduction
-- ✓ Parallel processing with 8 workers
-- ✓ Visualization of fused results
+### Option 2: Download data from AppEEARS
+Visit [NASA AppEEARS](https://appeears.earthdatacloud.nasa.gov/)
 
-**⏱️ Runtime:** ~5-10 minutes (depending on CPU)
+Go to Extract --> Area --> Start a New Request
 
-**📊 Output:** 
-- Fused hyperspectral images at 30m resolution
-- Uncertainty estimates (standard deviation)
-- Heatmap visualization of Day 4 results
+For HLS
+1. Select HLS products: HLSL30.002 and HLSS30.002
+2. Choose your area of interest and date range
+3. Download as NetCDF format 
 
----
+For EMIT
+1. Select EMIT products: EMIT_L2A_RFL.001, EMIT_L2A_MASK.001, EMIT_L2A_RFLUNCERT.001
+2. Choose your area of interest and date range
+3. Download as NetCDF format 
+
+Note, AppEEARS has data size limits on individual requests so you may need to make several smaller requests.
+
+### Step 6: Run the example fusion: emit_hls_demo.jl
+
+This example assumes data have been downloaded with the supplied downloader scripts. If you've downloaded data from AppEEARS, you will need to modify how your data are loaded. An updated example assuming AppEEARS inputs is forthcoming...
+
 
 #### Example 2: Real EMIT + HLS Fusion 🛰️
 
@@ -320,7 +331,7 @@ nsamp = 50  # Number of spatial samples per window
 window_buffer = 3  # Buffer pixels around windows
 
 # 4. Run fusion
-fused_images, fused_sd_images = scene_fusion_pmap(
+fused_images, fused_sd_images = gridded_fusion_pmap(
     data_list,
     inst_geodata,
     window_geodata,
@@ -339,27 +350,6 @@ fused_images, fused_sd_images = scene_fusion_pmap(
 
 ### Troubleshooting
 
-#### 🔧 Julia Package Issues
-
-**Problem:** "Package HyperSTARS not found"
-```bash
-# Solution: Ensure you're in the project directory and activate the environment
-cd /path/to/HyperSTARS.jl
-julia --project=. -e 'using Pkg; Pkg.instantiate()'
-```
-
-**Problem:** Package installation fails or gives errors
-```bash
-# Solution 1: Rebuild packages
-julia --project=. -e 'using Pkg; Pkg.build()'
-
-# Solution 2: Clean and reinstall
-julia --project=. -e 'using Pkg; Pkg.gc(); Pkg.resolve(); Pkg.instantiate()'
-
-# Solution 3: Update dependencies
-julia --project=. -e 'using Pkg; Pkg.update()'
-```
-
 #### 🐍 Python/HDF5 Errors
 
 **Problem:** "HDF Error -101" or "Unable to open file"
@@ -376,8 +366,8 @@ mamba install -c conda-forge h5py netcdf4 --force-reinstall
 **Problem:** "Module not found: rasters"
 ```bash
 # Solution: Ensure you're in the correct conda environment
-mamba activate EMITL2ARFL
-pip install --upgrade EMITL2ARFL
+mamba activate hyperstars_example
+pip install --upgrade hyperstars_example
 ```
 
 #### 💾 Memory Issues
