@@ -20,15 +20,18 @@ behavior).
 """
 function _process_cov!(Qf, Q, means, prec, t, nf, p, model_pars,
                        state_in_cov, cov_wt, tscov_pars, tscov_lag)
+
     Qf .= Q
     if state_in_cov
         h = isnothing(tscov_lag) ? t-1 : min(t-1, tscov_lag)
         Qf .*= cov_wt
 
-        Xtt = reshape(means[:,t-h:t], (nf,p,h+1))[:,:,:]
-        Wt  = @views reshape(prec[:,t-h:t], (nf,p,h+1))
-        Xtt .*= Wt
-        Xtt ./= sum(Wt, dims=3)
+        # Xtt = reshape(means[:,t-h:t], (nf,p,h+1))[:,:,:]
+        # Wt  = @views reshape(prec[:,t-h:t], (nf,p,h+1))
+        # Xtt .*= Wt
+        # Xtt ./= sum(Wt, dims=3)
+
+        Xtt = reshape(means[:,t-h:t], (nf,p,h+1)) ./ sqrt(h+1)
 
         for (i,x) in enumerate(tscov_pars)
             ids = ((i-1)*nf+1):i*nf
