@@ -283,14 +283,14 @@ function get_data(dir_path, date_range; metadata_dir=DEFAULT_METADATA_DIR)
     # bias_s30[5:8,:] .*= -(maximum(bias_hls[4:5]) ./ 2)
 
     ## create data struct objects, time-varying biases and variances repeat for constants
-    # hls_s30_data = InstrumentData(hls_s30_array, zeros(size(hls_s30_array)[3:4]), mse_s30, abs.(hls_s30_csize), hls_s30_times, [1,1], hls_s30_waves, S30_srf)
-    # hls_l30_data = InstrumentData(hls_l30_array, zeros(size(hls_l30_array)[3:4]), mse_l30, abs.(hls_l30_csize), hls_l30_times, [1,1], hls_l30_waves, L30_srf)
-    # emit_data = InstrumentData(emit_array, zeros(size(emit_array)[3:4]), 1e-6*ones(size(emit_array)[3:4]), abs.(emit_csize), emit_times, [1,1], emit_waves, [0.1])
+    hls_s30_data = InstrumentData(hls_s30_array, zeros(size(hls_s30_array)[3:4]), mse_s30, abs.(hls_s30_csize), hls_s30_times, [1,1], hls_s30_waves, S30_srf)
+    hls_l30_data = InstrumentData(hls_l30_array, zeros(size(hls_l30_array)[3:4]), mse_l30, abs.(hls_l30_csize), hls_l30_times, [1,1], hls_l30_waves, L30_srf)
+    emit_data = InstrumentData(emit_array, zeros(size(emit_array)[3:4]), 1e-6*ones(size(emit_array)[3:4]), abs.(emit_csize), emit_times, [1,1], emit_waves, [0.1])
 
     ## create data struct objects, time-varying biases and variances repeat for constants
-    hls_s30_data = InstrumentData(hls_s30_array, zeros(size(hls_s30_array)[3:4]), 1e-5*ones(size(hls_s30_array)[3:4]), abs.(hls_s30_csize), hls_s30_times, [1,1], hls_s30_waves, S30_srf)
-    hls_l30_data = InstrumentData(hls_l30_array, zeros(size(hls_l30_array)[3:4]), 1e-5*ones(size(hls_l30_array)[3:4]), abs.(hls_l30_csize), hls_l30_times, [1,1], hls_l30_waves, L30_srf)
-    emit_data = InstrumentData(emit_array, zeros(size(emit_array)[3:4]), 1e-6*ones(size(emit_array)[3:4]), abs.(emit_csize), emit_times, [1,1], emit_waves, [0.1])
+    # hls_s30_data = InstrumentData(hls_s30_array, zeros(size(hls_s30_array)[3:4]), 1e-5*ones(size(hls_s30_array)[3:4]), abs.(hls_s30_csize), hls_s30_times, [1,1], hls_s30_waves, S30_srf)
+    # hls_l30_data = InstrumentData(hls_l30_array, zeros(size(hls_l30_array)[3:4]), 1e-5*ones(size(hls_l30_array)[3:4]), abs.(hls_l30_csize), hls_l30_times, [1,1], hls_l30_waves, L30_srf)
+    # emit_data = InstrumentData(emit_array, zeros(size(emit_array)[3:4]), 1e-6*ones(size(emit_array)[3:4]), abs.(emit_csize), emit_times, [1,1], emit_waves, [0.1])
 
     ## vector of InstrumentData for all instruments, order must match inst30m_geodata order!
     data30m_list = [emit_data, hls_l30_data, hls_s30_data];
@@ -493,7 +493,7 @@ pvar_vec = mean(result3[:,:,:,1], dims=[1,2])# rescale pc basis
 pvar = ones((target_ndims...,size(B)[2])) .* pvar_vec # prior var array (nx x ny x np)
 
 ## setting spatial variance parameters 
-model_pars = ones((nwindows...,size(B)[2],4)) .* reshape([0.1,100,1e-10,1.5], (1,1,1,4)) # covariance parameters (nx x ny x np x 4), last dimension is [spatial var, length scale, nugget, smoothness]
+model_pars = ones((nwindows...,size(B)[2],4)) .* reshape([0.1,2000,1e-10,1.5], (1,1,1,4)) # covariance parameters (nx x ny x np x 4), last dimension is [spatial var, length scale, nugget, smoothness]
 model_pars[:,:,:,1] .= result3[:,:,:,1]
 
 ar_phi = 1.0
@@ -520,12 +520,12 @@ target_times = eachindex(all_dates)
             nsamp=0,
             window_buffer = 4,
             target_times = 1:92, 
-            smooth = false, 
+            smooth = true, 
             uncertainty = :filtered,          
-            spatial_mod = exp_corD,                                           
+            spatial_mod = mat32_corD,                                           
             obs_operator = unif_weighted_obs_operator_centroid,
             state_in_cov=true,
-            cov_wt=0.2,
+            cov_wt=0.3,
             tscov_pars = sqrt.(pvar_vec[:]) ./ 10.0, 
             window_radius=0.0,
             use_progress_bar=true);
