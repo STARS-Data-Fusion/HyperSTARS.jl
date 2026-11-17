@@ -80,7 +80,6 @@ Before starting, ensure you have:
 - ✅ **Julia 1.11.0 or later** - [Download here](https://julialang.org/downloads/)
 - ✅ **Python 3.10+ with conda/mamba** - [Get Miniforge](https://github.com/conda-forge/miniforge)
 - ✅ **NASA Earthdata account** - [Register free](https://urs.earthdata.nasa.gov/)
-- ✅ **~10 GB disk space** - For data and dependencies
 - ✅ **Basic command line knowledge** - Running bash/shell commands
 
 ### Step 1: Install Julia Package
@@ -210,6 +209,7 @@ python download_emit_data.py
 
 Download HLS data using download_hls_data.py. Update for your date range and AOI.
 
+**python**
 ```python
 from os.path import join
 import matplotlib.pyplot as plt
@@ -259,6 +259,8 @@ if __name__ == "__main__":
     main()
 ```
 Run the script.
+
+**bash**
 ```bash
 python download_hls_data.py
 ```
@@ -280,175 +282,15 @@ For EMIT
 
 Note, AppEEARS has data size limits on individual requests so you may need to make several smaller requests.
 
-### Step 6: Run the example fusion: emit_hls_demo.jl
+### Step 3: Run the example fusion: emit_hls_demo_v2.jl
 
 This example assumes data have been downloaded with the supplied downloader scripts. If you've downloaded data from AppEEARS, you will need to modify how your data are loaded. An updated example assuming AppEEARS inputs is forthcoming...
-
-
-#### Example 2: Real EMIT + HLS Fusion 🛰️
-
-**What it does:** Processes real satellite data with cloud masking and temporal fusion
 
 First, ensure you have both EMIT and HLS data, then modify the paths in the example:
 
 ```bash
-julia --project=. examples/emit_hls_demo.jl
+julia --project=. examples/emit_hls_demo_v2.jl
 ```
-
-**Features demonstrated:**
-- ✓ Loading real EMIT and HLS NetCDF data
-- ✓ Spectral response function handling
-- ✓ Cloud masking with Fmask
-- ✓ Adaptive process noise covariance
-- ✓ Animated time series output
-
-**⏱️ Runtime:** ~30-60 minutes (depending on scene size and CPU cores)
-
-**📊 Output:** 
-- Fused images combining EMIT's spectral resolution (285 bands) with HLS's temporal coverage
-- Animated GIF showing temporal evolution
-- Full hyperspectral reconstructions at each time step
-- Plots comparing observations with fused estimates
-
-
-### Step 7: Customize for Your Data
-
-To process your own data, modify the example scripts:
-
-```julia
-# 1. Update file paths
-emit_files = glob("*.nc", "your_EMIT_directory")
-hls_filename = "your_HLS_file.nc"
-
-# 2. Define your target area
-target_origin = [UTM_easting, UTM_northing]
-target_csize = [30.0, -30.0]  # 30m pixel size
-target_ndims = [rows, cols]
-
-# 3. Set processing parameters
-scf = 5  # Window size (5x5 target pixels)
-nsamp = 50  # Number of spatial samples per window
-window_buffer = 3  # Buffer pixels around windows
-
-# 4. Run fusion
-fused_images, fused_sd_images = gridded_fusion_pmap(
-    data_list,
-    inst_geodata,
-    window_geodata,
-    target_geodata,
-    spectral_mean,
-    prior_mean,
-    prior_var,
-    basis_functions,
-    model_pars;
-    nsamp=nsamp,
-    window_buffer=window_buffer,
-    target_times=1:num_timesteps,
-    smooth=false
-)
-```
-
-### Troubleshooting
-
-#### 🐍 Python/HDF5 Errors
-
-**Problem:** "HDF Error -101" or "Unable to open file"
-```bash
-# Solution: Set environment variable (especially on HPC systems)
-set -Ux HDF5_USE_FILE_LOCKING FALSE  # fish shell
-# or
-export HDF5_USE_FILE_LOCKING=FALSE   # bash shell
-
-# Reinstall with conda-forge HDF5 (recommended)
-mamba install -c conda-forge h5py netcdf4 --force-reinstall
-```
-
-**Problem:** "Module not found: rasters"
-```bash
-# Solution: Ensure you're in the correct conda environment
-mamba activate hyperstars_example
-pip install --upgrade hyperstars_example
-```
-
-#### 💾 Memory Issues
-
-**Symptom:** Julia crashes with "Out of Memory" errors
-
-**Solutions:**
-- ⬇️ Reduce window size: `scf = 3` (instead of 5)
-- ⬇️ Reduce spatial samples: `nsamp = 30` (instead of 50)
-- ⬇️ Process fewer time steps: `target_times = 1:10` (instead of 1:63)
-- ⬇️ Use fewer parallel workers: `addprocs(4)` (instead of 8)
-- 📊 Process smaller spatial subsets: reduce `target_ndims`
-
-#### 🐌 Slow Performance
-
-**Symptom:** Processing takes hours or appears stuck
-
-**Solutions:**
-- ⬆️ Increase parallel workers: `addprocs(16)` or `addprocs(Sys.CPU_THREADS)`
-- ⚙️ Optimize BLAS threads: `BLAS.set_num_threads(1)` on each worker (already in examples)
-- ⬇️ Reduce spatial buffer: `window_buffer = 2` (instead of 3 or 4)
-- ✂️ Process subset first: Set `target_ndims = [50, 50]` for testing
-- 🔍 Check CPU usage: Ensure workers are actually running in parallel
-
-#### 🔑 NASA Earthdata Issues
-
-**Problem:** "Authentication failed" or "403 Forbidden"
-
-**Solution:** Check your .netrc file
-```bash
-# Verify .netrc exists and is properly formatted
-cat ~/.netrc
-
-# Should contain:
-# machine urs.earthdata.nasa.gov
-# login YOUR_USERNAME
-# password YOUR_PASSWORD
-
-# Fix permissions if needed
-chmod 600 ~/.netrc
-```
-
-#### 🌐 Data Download Issues
-
-**Problem:** "No granules found" or download hangs
-
-**Solutions:**
-- ✅ Verify date range has EMIT coverage: Check [EMIT Orbit Calculator](https://earth.jpl.nasa.gov/emit/)
-- ✅ Confirm your area is covered: EMIT has global but not continuous coverage
-- ✅ Try smaller date range: Start with 1-2 weeks
-- ✅ Check internet connection and NASA server status
-
----
-
-### Frequently Asked Questions (FAQ)
-
-**Q: Do I need both Julia and Python?**  
-A: Yes. Julia runs the fusion algorithm (HyperSTARS.jl), while Python downloads and preprocesses EMIT data (EMIT-L2A-RFL). They work together in the workflow.
-
-**Q: Can I use my own area of interest?**  
-A: Absolutely! Define your area using coordinates or KML files when downloading EMIT data. See Step 4, Option B for examples.
-
-**Q: How much data do I need to download?**  
-A: Each EMIT granule is ~500 MB. For a small area over 1 month, expect 2-5 GB. HLS data adds another 1-2 GB per month.
-
-**Q: What sensors does HyperSTARS support?**  
-A: Currently optimized for EMIT (hyperspectral), HLS (multispectral), and PACE (ocean color). The framework can be adapted for other sensors with appropriate observation operators.
-
-**Q: How accurate are the fused results?**  
-A: Accuracy depends on input data quality, coverage, and fusion parameters. The package provides uncertainty estimates alongside fused values. Validation against ground truth is recommended for your application.
-
-**Q: Can I run this on HPC/cluster systems?**  
-A: Yes! Julia's parallel processing works well on HPC. Just ensure HDF5 libraries are compatible (see troubleshooting) and increase `addprocs()` to match available cores.
-
-**Q: What's the minimum area size I can process?**  
-A: No technical minimum, but small areas (< 10×10 km) may have limited EMIT coverage. Larger areas (> 50×50 km) provide better statistics for fusion.
-
-**Q: How long does processing take?**  
-A: For a 50×50 pixel scene with 4 time steps: ~5-10 minutes on a modern laptop. Larger scenes scale roughly linearly with pixel count.
-
----
 
 ### Additional Resources
 
@@ -463,72 +305,6 @@ For questions or issues:
 - **HyperSTARS.jl**: [maggie.johnson@jpl.nasa.gov](mailto:maggie.johnson@jpl.nasa.gov)
 - **EMIT data**: [gregory.h.halverson@jpl.nasa.gov](mailto:gregory.h.halverson@jpl.nasa.gov)
 - **GitHub Issues**: [Open an issue](https://github.com/STARS-Data-Fusion/HyperSTARS.jl/issues)
-
-## Key Features
-
-* **Multi-Sensor Data Fusion**: Integrates observations from various instruments with different characteristics (e.g., spatial resolution, spectral bands, temporal coverage).
-
-* **Spatio-Spectral-Temporal Modeling**: Accounts for correlations and dependencies across spatial, spectral, and temporal dimensions.
-
-* **Kalman Filtering and Smoothing**: Employs an efficient, recursive Bayesian estimation framework to produce optimal (minimum mean squared error) estimates of the underlying unobserved processes.
-
-* **Kronecker Product Structures**: Utilizes Kronecker products for efficient handling of high-dimensional spatio-spectral covariance matrices, enhancing computational performance.
-
-* **Adaptive Process Noise**: Allows for dynamically adjusting the model's process noise covariance based on the estimated state and its uncertainty, improving adaptability to changing environmental conditions.
-
-* **Parallel Processing**: Designed to distribute computations across multiple spatial windows using Julia's `pmap` functionality, enabling scalable processing of large scenes.
-
-* **Uncertainty Quantification**: Provides estimates of both the fused product and its associated uncertainty (e.g., standard deviation), crucial for downstream applications and decision-making.
-
-## Core Components
-
-The package is structured into several Julia files, each focusing on specific functionalities:
-
-* **`HyperSTARS.jl` (Main Module)**:
-
-    * Defines the overall module structure and exports key functions and data types.
-
-    * Implements the main `hyperSTARS_fusion_kr_dict` (core fusion algorithm for a single window) and `scene_fusion_pmap` (orchestrates parallel fusion across a scene) functions.
-
-    * Includes definitions for `KSModel` (standard Kalman state-space model) and `HSModel` (Hyperspectral STARS specific model with separated spatio-spectral components).
-
-    * Defines `InstrumentData` and `InstrumentGeoData` structs for organizing diverse input data.
-
-    * Contains the `woodbury_filter_kr` (Kalman filter update using Woodbury identity) and `smooth_series` (Kalman smoother) implementations.
-
-    * Manages data organization (`organize_data`, `create_data_dicts`) for efficient processing.
-
-* **`GP_utils.jl`**:
-
-    * Provides various Gaussian Process (GP) related utility functions.
-
-    * Includes implementations of common covariance functions such as `kernel_matrix` (Squared Exponential), `matern_cor`, `exp_cor`, `mat32_cor`, and `mat52_cor` (Matern family kernels).
-
-    * Offers versions (`_D`) that take precomputed distance matrices for efficiency.
-
-    * Implements `state_cov` for adaptive process noise covariance calculation.
-
-    * Functions for building block-diagonal GP covariance matrices (`build_gpcov`).
-
-* **`resampling_utils.jl`**:
-
-    * Contains functions for handling resampling and creating observation operators.
-
-    * `unif_weighted_obs_operator_centroid` and `gauss_weighted_obs_operator` construct observation matrices based on uniform or Gaussian weighting of target cells to sensor observations.
-
-    * Includes `rsr_conv_matrix` for converting Relative Spectral Response (RSR) information into spectral convolution matrices, handling both FWHM and discrete RSR curve inputs.
-
-* **`spatial_utils.jl` (and `spatial_utils_ll.jl`)**:
-
-    * These files provide a suite of utility functions for spatial indexing, coordinate transformations, and grid operations.
-
-    * Functions like `find_nearest_ij`, `find_all_ij_ext` (for centroid containment), `find_all_touching_ij_ext` (for cell overlap), `get_sij_from_ij` (index to coordinate conversion), and `bbox_from_centroid` are crucial for managing spatial data.
-
-    * Includes methods for subsampling Basic Area Units (BAUs), notably `sobol_bau_ij` for quasi-random sampling using Sobol sequences.
-
-    * Functions for determining raster origins and cell sizes (`get_origin_raster`, `cell_size`).
-
-    * Utilities for finding and merging overlapping spatial extents (`find_overlapping_ext`, `merge_extents`).
 
 ## Citations and Acknowledgments
 
@@ -551,5 +327,4 @@ See [LICENSE](LICENSE) file for details.
 
 ---
 
-**Ready to get started?** Head back to [Step 1](#step-1-install-julia-package) and follow the guide!
 
