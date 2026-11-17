@@ -155,7 +155,7 @@ from EMITL2ARFL import generate_EMIT_L2A_RFL_timeseries
 
 START_DATE   = "2023-06-01"
 END_DATE     = "2023-08-31"
-AOI_FILE     = "iowa_ag.geojson"
+AOI_FILE     = "iowa_small.geojson"
 DOWNLOAD_DIR = os.path.expanduser("./EMIT_download")
 OUTPUT_DIR   = os.path.expanduser("./EMIT_data")
 
