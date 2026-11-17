@@ -32,7 +32,7 @@ def main():
 
     gdf.geometry[0]
 
-    bbox_UTM = rt.Polygon(gdf.union_all()).UTM.bbox
+    bbox_UTM = rt.Polygon(gdf.union_all(), crs=gdf.crs).UTM.bbox
 
     # Log into earthaccess using netrc credentials
     earthaccess.login(strategy="netrc", persist=True)
